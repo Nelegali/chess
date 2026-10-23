@@ -1,0 +1,14 @@
+services:
+  chess:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - chess-data:/data
+    environment:
+      # Необязательно: токен Lichess для статистики «что здесь играют»
+      - LICHESS_TOKEN=${LICHESS_TOKEN:-}
+
+volumes:
+  chess-data:
