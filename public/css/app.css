@@ -1978,3 +1978,62 @@ body[data-view='drill'] .update-bar {
   font-size: 0.92rem;
   color: var(--muted);
 }
+
+.icon-btn.home {
+  font-size: 20px;
+  padding-bottom: 0;
+}
+.sq.path {
+  white-space: nowrap;
+}
+
+/* ───── сравнение «если так / по теории» ───── */
+
+.wn-compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+.wn-compare figure {
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wn-compare figcaption {
+  font-size: 0.85rem;
+  text-align: center;
+}
+.wn-compare .wn-preview-board {
+  width: 100%;
+  margin: 0;
+}
+.wn-compare p {
+  text-align: left;
+}
+
+/* ───── статистика Lichess: строки нажимаются ───── */
+
+.ex-row {
+  cursor: pointer;
+}
+.ex-row:hover,
+.ex-row:focus-visible {
+  background: color-mix(in srgb, var(--blue) 10%, transparent);
+  outline: none;
+}
+.ex-detail td {
+  padding: 8px 6px 12px;
+  background: var(--surface);
+}
+.ex-detail p {
+  margin: 0 0 6px;
+}
+.wdb {
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.wdb .w {
+  background: #fafafa;
+  box-shadow: inset 0 0 0 1px #cfcac2;
+}

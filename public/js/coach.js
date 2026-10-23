@@ -167,7 +167,36 @@ export function explain(fenBefore, alt, theory, opts = {}) {
   const r = explainCore(fenBefore, alt, theory, opts);
   const reply = r.demo && r.demo[1] ? r.demo[1].m : null;
   r.preview = previewLine(fenBefore, reply ? [alt.san, reply] : [alt.san], r.arrows, r.verdict === 'good' ? 'green' : 'blue');
+  if (!reply && r.visual) r.preview.shapes.push(...r.visual);
+  r.preview.caption = reply
+    ? 'Синяя стрелка — этот ход, красная — ответ соперника.'
+    : r.visualCaption ||
+      (r.arrows ? 'Синяя стрелка — этот ход, остальные — его идеи и угрозы.' : r.verdict === 'good' ? 'Зелёная стрелка — этот ход.' : 'Синяя стрелка — этот ход.');
   return r;
+}
+
+// Наглядность к причинам «почему хуже»: что показать на доске после хода.
+const KNIGHT_JUMPS = [[1, 2], [2, 1], [2, -1], [1, -2], [-1, -2], [-2, -1], [-2, 1], [-1, 2]];
+function knightTargets(sq) {
+  const f = sq.charCodeAt(0) - 97;
+  const r = +sq[1] - 1;
+  return KNIGHT_JUMPS.map(([df, dr]) => [f + df, r + dr])
+    .filter(([x, y]) => x >= 0 && x < 8 && y >= 0 && y < 8)
+    .map(([x, y]) => String.fromCharCode(97 + x) + (y + 1));
+}
+
+// Ходы соперника, которые нападают на фигуру на square (например, гонят рано вышедшего ферзя).
+function chasers(after, square, limit = 2) {
+  const out = [];
+  for (const m of after.moves({ verbose: true })) {
+    if (m.captured) continue;
+    after.move(m);
+    const hits = after.attackers(square, m.color).includes(m.to);
+    after.undo();
+    if (hits) out.push({ orig: m.from, dest: m.to, brush: 'red' });
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 function explainCore(fenBefore, alt, theory, { lineId, ply, reveal = true } = {}) {
@@ -259,20 +288,32 @@ function explainCore(fenBefore, alt, theory, { lineId, ply, reveal = true } = {}
 
   // 4. Принципы дебюта
   const reasons = [];
+  const visuals = [];
   if (alt.piece === 'k' && !isCastle(alt)) {
     reasons.push(['dubious', 'Король уходит с места и теряет право на рокировку — он останется в центре, под ударом.']);
+    visuals.push([[{ orig: alt.to, brush: 'yellow' }], 'Король сдвинулся с места — рокировка ему больше недоступна.']);
   }
   if (theory && isCastle(theory) && !isCastle(alt)) {
     reasons.push(['dubious', 'Пора прятать короля: рокировка уводит его из центра и подключает ладью к игре.']);
   }
   if (alt.piece === 'q' && fullmove <= 8 && !alt.captured && !(theory && theory.piece === 'q')) {
     reasons.push(['dubious', 'Ферзь выходит слишком рано: лёгкие фигуры соперника будут нападать на него с темпом, а твоё развитие отстанет.']);
+    const ch = chasers(new Chess(after.fen()), alt.to);
+    if (ch.length) visuals.push([ch, 'Красные стрелки — как соперник сможет нападать на ферзя, заодно развивая свои фигуры.']);
   }
   if (alt.piece === 'n' && 'ah'.includes(alt.to[0]) && !(theory && theory.piece === 'n' && 'ah'.includes(theory.to[0]))) {
     reasons.push(['dubious', 'Конь на краю доски контролирует вдвое меньше полей. Недаром говорят: «конь на краю — доске урон».']);
+    const t = knightTargets(alt.to);
+    visuals.push([t.map((sq) => ({ orig: sq, brush: 'yellow' })), `Жёлтые кружки — клетки, которые бьёт конь с ${alt.to}: всего ${t.length}. Из центра доски конь бьёт до 8 клеток.`]);
   }
   if (alt.piece === 'p' && alt.from[0] === 'f' && fullmove <= 10 && !(theory && theory.from[0] === 'f')) {
     reasons.push(['dubious', 'Пешка f прикрывает короля: её ход ослабляет диагональ к королю (вспомни мат дурака).']);
+    const k = side === 'w' ? 'e1' : 'e8';
+    const corner = side === 'w' ? 'h4' : 'h5';
+    const middle = side === 'w' ? 'g3' : 'g6';
+    if (after.get(k)?.type === 'k' && !after.get(middle)) {
+      visuals.push([[{ orig: corner, dest: k, brush: 'red' }], 'Красная стрелка — открывшаяся диагональ: по ней ферзь соперника может добраться до короля.']);
+    }
   }
   if (alt.piece === 'p' && 'ah'.includes(alt.from[0]) && fullmove <= 6 && !(theory && theory.piece === 'p' && 'ah'.includes(theory.from[0]))) {
     reasons.push(['dubious', 'Ход крайней пешкой почти ничего не даёт: в дебюте важнее центр и развитие фигур.']);
@@ -293,7 +334,12 @@ function explainCore(fenBefore, alt, theory, { lineId, ply, reveal = true } = {}
   }
   if (reasons.length) {
     reasons.sort((a, b) => SEVERITY[b[0]] - SEVERITY[a[0]]);
-    return result(reasons[0][0], reasons.slice(0, 2).map((r) => r[1]).join(' '));
+    const r = result(reasons[0][0], reasons.slice(0, 2).map((x) => x[1]).join(' '));
+    if (visuals.length) {
+      r.visual = visuals[0][0];
+      r.visualCaption = visuals[0][1];
+    }
+    return r;
   }
 
   // 5. Ничего плохого не нашли

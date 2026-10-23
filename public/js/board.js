@@ -294,6 +294,18 @@ export class Board {
     this.renderInsight();
   }
 
+  // Ненадолго показать путь стрелками (когда в тексте нажали на «e1–h4»).
+  flashPath(squares) {
+    if (!this.el.isConnected || this.previewing) return;
+    clearTimeout(this.flashTimer);
+    const arrows = [];
+    for (let i = 1; i < squares.length; i++) arrows.push({ orig: squares[i - 1], dest: squares[i], brush: 'blue' });
+    this.applyShapes(arrows);
+    this.flashTimer = setTimeout(() => {
+      if (!this.previewing && this.el.isConnected) this.applyShapes();
+    }, 2200);
+  }
+
   // Ненадолго подсветить клетки (когда в тексте нажали на «f7»).
   flash(squares) {
     if (!this.el.isConnected || this.previewing) return;

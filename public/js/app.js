@@ -27,8 +27,13 @@ const figText = (s) =>
     .replace(/(^|[^A-Za-zА-Яа-яЁё])([KQRBN])([a-h]?[1-8]?x?[a-h][1-8])/g, (m, pre, p, rest) => pre + FIG_TEXT[p] + rest);
 
 // Названия клеток (f7, e4…) — нажимаемые: подсвечивают клетку на доске.
+// Путь вида «e1–h4» или «b1–d2–f1–g3» рисуется стрелками.
 const squaresText = (s) =>
-  s.replace(/(^|[^A-Za-z0-9_])([a-h][1-8])(?![A-Za-z0-9])/g, (m, pre, sq) => `${pre}<span class="sq" data-sq="${sq}">${sq}</span>`);
+  s.replace(/(^|[^A-Za-z0-9_])([a-h][1-8](?:–[a-h][1-8])*)(?![A-Za-z0-9])/g, (m, pre, text) =>
+    text.includes('–')
+      ? `${pre}<span class="sq path" data-path="${text.split('–').join(',')}">${text}</span>`
+      : `${pre}<span class="sq" data-sq="${text}">${text}</span>`,
+  );
 
 // Экранированный текст, где термины из словаря — нажимаемые кнопки, а клетки подсвечиваются.
 const rich = (s) => linkTerms(squaresText(figText(esc(s))));
@@ -112,6 +117,7 @@ function miniBoard(el, fen, orientation, lastMove, shapes = [], coordinates = fa
     animation: { enabled: false },
     drawable: { enabled: false, visible: true, autoShapes: shapes },
   });
+  requestAnimationFrame(() => cg.redrawAll());
   onCleanup(() => cg.destroy());
   return cg;
 }
@@ -130,7 +136,7 @@ function renderTopbar(opts = {}) {
   const lv = store.levelInfo();
   const s = store.streak();
   const back = opts.back
-    ? `<a class="icon-btn" href="${opts.back}" aria-label="Назад">‹</a>`
+    ? `<a class="icon-btn" href="${opts.back}" aria-label="Назад">‹</a>${opts.back !== '#/' ? '<a class="icon-btn home" href="#/" aria-label="На главную" title="На главную">⌂</a>' : ''}`
     : `<a class="brand" href="#/"><span class="logo">♞</span>${opts.title ? '' : '<span>Дебюты</span>'}</a>`;
   topbar.innerHTML = `
     ${back}
@@ -753,13 +759,12 @@ function learnView(lineId) {
       const box = el.querySelector('.wn-preview');
       if (!btn || !box) continue;
       btn.onclick = () => {
-        if (!box.dataset.mounted) {
-          box.innerHTML = `<div class="wn-preview-board"></div><p class="muted small">${previewLabel(c.preview, startPly)}. Синяя стрелка — этот ход, красная — ответ соперника.</p>`;
-          miniBoard(box.querySelector('.wn-preview-board'), c.preview.fen, colorName(side), c.preview.lastMove, c.preview.shapes, true);
-          box.dataset.mounted = '1';
-        }
         box.hidden = !box.hidden;
         btn.textContent = box.hidden ? '👀 Что будет на доске' : 'Скрыть доску';
+        if (!box.hidden && !box.dataset.mounted) {
+          box.dataset.mounted = '1';
+          mountCompare(box, c.preview, startPly);
+        }
       };
     }
     // «А если бы соперник сыграл иначе?» — предпросмотр при наведении
@@ -788,6 +793,37 @@ function learnView(lineId) {
       hidePreview();
     });
   }
+  // Сравнение: слева — что будет после варианта, справа — ход по теории со стрелками урока.
+  function mountCompare(box, pv, startPly) {
+    const theoryMove = moves[startPly];
+    const theoryStep = line.steps[startPly];
+    const theoryShapes = theoryMove
+      ? [{ orig: theoryMove.from, dest: theoryMove.to, brush: 'green' }, ...parseArrows(theoryStep.a).filter((x) => x.orig + (x.dest || '') !== theoryMove.from + theoryMove.to)]
+      : [];
+    const theoryText = theoryStep ? (theoryStep.t.match(/^.*?[.!?](\s|$)/) || [theoryStep.t])[0] : '';
+    box.innerHTML = `
+      <div class="wn-compare">
+        <figure>
+          <figcaption><b>Если ${previewLabel(pv, startPly)}</b></figcaption>
+          <div class="wn-preview-board" data-b="alt"></div>
+          <p class="muted small">${rich(pv.caption || '')}</p>
+        </figure>
+        ${
+          theoryMove
+            ? `<figure>
+                <figcaption><b>По теории: ${moveLabel(startPly, theoryMove.san)}</b></figcaption>
+                <div class="wn-preview-board" data-b="theory"></div>
+                <p class="muted small">${rich(theoryText)}</p>
+              </figure>`
+            : ''
+        }
+      </div>`;
+    miniBoard(box.querySelector('[data-b="alt"]'), pv.fen, colorName(side), pv.lastMove, pv.shapes, true);
+    if (theoryMove) {
+      miniBoard(box.querySelector('[data-b="theory"]'), fens[startPly + 1], colorName(side), [theoryMove.from, theoryMove.to], theoryShapes, true);
+    }
+  }
+
   function myTurnNow() {
     return ply < N && turnAt(fens[ply]) === side;
   }
@@ -835,7 +871,7 @@ function learnView(lineId) {
               const n = m.white + m.draws + m.black;
               const pct = Math.round((n / total) * 100);
               const isTheory = theory && m.uci === theory.from + theory.to;
-              return `<tr class="${isTheory ? 'theory' : ''}">
+              return `<tr class="ex-row ${isTheory ? 'theory' : ''}" data-uci="${m.uci}" data-san="${esc(m.san)}" data-w="${m.white}" data-d="${m.draws}" data-b="${m.black}" tabindex="0">
                 <td class="ex-san">${figurine(m.san)}${isTheory ? ' ★' : ''}</td>
                 <td class="ex-pct">${pct}%</td>
                 <td class="ex-bar"><span class="wdb">
@@ -845,10 +881,74 @@ function learnView(lineId) {
             })
             .join('')}
         </table>
-        <p class="muted small">★ — ход по нашей теории. Полоска: победы белых / ничьи / победы чёрных.</p>`;
+        <p class="muted small">★ — ход по нашей теории. Полоска: победы белых / ничьи / победы чёрных. Наведи на ход — покажу его на доске, нажми — разберу.</p>`;
+      bindExplorerRows(el, theory);
     } catch (e) {
       if (el.isConnected) renderExplorerHelp(el, e, currentFen(), side, loadExplorer);
     }
+  }
+
+  // Строки статистики: наведение — стрелка на доске, нажатие — разбор хода с предпросмотром.
+  function bindExplorerRows(el, theory) {
+    const fen = currentFen();
+    const startPly = alt ? alt.base + alt.ply : ply;
+    el.querySelectorAll('.ex-row').forEach((row) => {
+      const uci = row.dataset.uci;
+      const isTheory = theory && uci === theory.from + theory.to;
+      const arrow = [{ orig: uci.slice(0, 2), dest: uci.slice(2, 4), brush: isTheory ? 'green' : 'blue' }];
+      row.addEventListener('pointermove', (e) => e.pointerType === 'mouse' && board.applyShapes(arrow));
+      row.addEventListener('pointerleave', (e) => e.pointerType === 'mouse' && board.applyShapes());
+      const toggle = () => {
+        const next = row.nextElementSibling;
+        if (next && next.classList.contains('ex-detail')) {
+          next.remove();
+          return;
+        }
+        const move = sanToMove(fen, row.dataset.san);
+        if (!move) return;
+        const w = +row.dataset.w;
+        const d = +row.dataset.d;
+        const b = +row.dataset.b;
+        const n = w + d + b || 1;
+        const pct = (x) => Math.round((x / n) * 100);
+        const stats = `После этого хода белые выигрывают ${pct(w)}%, ничьи ${pct(d)}%, чёрные выигрывают ${pct(b)}%.`;
+        let body2;
+        let e2 = null;
+        if (isTheory) {
+          const step = alt ? alt.def.steps[alt.ply] : line.steps[ply];
+          body2 = `<p><span class="wn-badge v-good">по теории</span> ${rich(step ? step.t : '')}</p>`;
+        } else {
+          e2 = coach.explain(fen, move, theory || null, alt ? {} : { lineId: line.id, ply });
+          body2 = `<p>${verdictBadge(e2.verdict)} ${rich(e2.text)}</p>`;
+        }
+        const tr = document.createElement('tr');
+        tr.className = 'ex-detail';
+        tr.innerHTML = `<td colspan="3">
+          ${body2}
+          <p class="muted small">${stats}</p>
+          ${e2 ? `<div class="wn-actions"><button type="button" class="btn tiny" data-peek="ex">👀 Что будет на доске</button>${e2.demo ? '<button type="button" class="btn tiny" data-demo="ex">▶ Разыграть по ходам</button>' : ''}</div><div class="wn-preview" hidden></div>` : ''}
+        </td>`;
+        row.after(tr);
+        if (!e2) return;
+        const btn = tr.querySelector('[data-peek]');
+        const box = tr.querySelector('.wn-preview');
+        btn.onclick = () => {
+          box.hidden = !box.hidden;
+          btn.textContent = box.hidden ? '👀 Что будет на доске' : 'Скрыть доску';
+          if (!box.hidden && !box.dataset.mounted) {
+            box.dataset.mounted = '1';
+            if (alt) {
+              box.innerHTML = '<div class="wn-preview-board"></div>';
+              miniBoard(box.querySelector('.wn-preview-board'), e2.preview.fen, colorName(side), e2.preview.lastMove, e2.preview.shapes, true);
+            } else mountCompare(box, e2.preview, startPly);
+          }
+        };
+        const demo = tr.querySelector('[data-demo]');
+        if (demo) demo.onclick = () => startDemo({ ...e2, san: move.san });
+      };
+      row.addEventListener('click', toggle);
+      row.addEventListener('keydown', (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), toggle()));
+    });
   }
 
   function forward() {
@@ -1688,6 +1788,14 @@ function diagramHtml(o, kind) {
 
 function mountDiagrams(root) {
   root.querySelectorAll('[data-diagram]:not([data-mounted])').forEach((el) => {
+    const details = el.closest('details');
+    if (details && !details.open) {
+      if (!details.dataset.watch) {
+        details.dataset.watch = '1';
+        details.addEventListener('toggle', () => details.open && mountDiagrams(details));
+      }
+      return;
+    }
     const [id, kind] = el.dataset.diagram.split('|');
     const o = OPENINGS.find((x) => x.id === id);
     const spec = DIAGRAMS[id][kind];
@@ -1866,13 +1974,18 @@ window.addEventListener('hashchange', route);
 // На компьютере клетка подсвечивается уже при наведении мыши.
 document.addEventListener('mouseover', (e) => {
   const sq = e.target.closest && e.target.closest('.sq');
-  if (sq && activeBoard) activeBoard.flash([sq.dataset.sq]);
+  if (sq && activeBoard) flashSquareLink(sq);
 });
+
+function flashSquareLink(el) {
+  if (el.dataset.path) activeBoard.flashPath(el.dataset.path.split(','));
+  else activeBoard.flash([el.dataset.sq]);
+}
 // Повторное нажатие на ссылку текущей страницы (например, вкладку «Викторина» после результата)
 // не меняет адрес, поэтому перерисовываем вручную.
 document.addEventListener('click', (e) => {
   const sq = e.target.closest('.sq');
-  if (sq && activeBoard) activeBoard.flash([sq.dataset.sq]);
+  if (sq && activeBoard) flashSquareLink(sq);
   const term = e.target.closest('.term');
   if (term) {
     e.preventDefault();
