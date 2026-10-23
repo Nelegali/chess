@@ -2233,6 +2233,87 @@ body[data-view='drill'] .update-bar {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.list-mode {
+  display: inline-flex;
+  gap: 2px;
+  margin: 0 0 8px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.list-mode button {
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.list-mode button.on {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+}
+.engine-busy {
+  animation: busy 1.2s ease-in-out infinite;
+}
+@keyframes busy {
+  50% {
+    opacity: 0.45;
+  }
+}
+.c-chips {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+.c-chip {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.c-chip.book {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  white-space: normal;
+}
+.c-chip.score {
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 14%, transparent);
+}
+.c-chip.e-best {
+  color: #fff;
+  background: var(--accent);
+}
+.c-chip.e-good {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.c-chip.e-ok {
+  color: #c98a00;
+  background: color-mix(in srgb, var(--gold) 16%, transparent);
+}
+.c-chip.e-bad {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .engine-busy {
+    animation: none;
+  }
+}
+.eng-note {
+  margin: -2px 0 10px;
+}
 .c-idea {
   grid-column: 1 / -1;
   margin-top: 2px;

@@ -6,6 +6,7 @@ import qrcode from '../vendor/qrcode.js';
 import { play as sound } from './sound.js';
 import * as lichess from './lichess.js';
 import { moveStats } from './popularity.js';
+import * as engine from './engine.js';
 import { BASICS, GLOSSARY, GLOSSARY_BY_ID, OPENING_THEORY, DIAGRAMS, linkTerms } from './theory.js';
 import * as coach from './coach.js';
 import { APP_VERSION, APP_DATE } from './version.js';
@@ -1952,6 +1953,15 @@ function freeView() {
     const a = analyse(i);
     const ex = explorerData.get(fens[i]);
     const pop = ex && ex.data ? popularityHtml(ex.data, m.san) : '';
+    // что сказал движок про этот ход (если он уже считал позицию до хода)
+    const before = engineLines.get(fens[i]);
+    let engineNote = '';
+    if (Array.isArray(before) && before.length) {
+      const l = before.find((x) => x.uci === uciOf(m));
+      engineNote = l
+        ? `<div class="eng-note">${engineChip({ line: l, delta: engine.scoreOf(before[0]) - engine.scoreOf(l) }, mover)}${l.rank === 1 ? '' : ` <span class="muted small">лучше было ${figurine(sanToMove(fens[i], { from: before[0].uci.slice(0, 2), to: before[0].uci.slice(2, 4), promotion: before[0].uci[4] })?.san || '')}</span>`}</div>`
+        : `<div class="eng-note"><span class="c-chip e-bad">🤖 не в числе лучших ходов движка</span> <span class="muted small">лучше было ${figurine(sanToMove(fens[i], { from: before[0].uci.slice(0, 2), to: before[0].uci.slice(2, 4), promotion: before[0].uci[4] })?.san || '')}</span></div>`;
+    }
     const punish =
       a.reply && (a.verdict === 'blunder' || a.verdict === 'mistake')
         ? `Красная стрелка на доске — как ${mover === side ? 'соперник накажет' : 'ты можешь наказать'}: ${figurine(a.reply.san)}`
@@ -1971,6 +1981,7 @@ function freeView() {
         <div class="move-head"><span class="san">${moveLabel(i, m.san)}</span><span class="who ${mover === side ? 'me' : 'opp'}">${mover === side ? 'твой ход' : 'ход соперника'}</span></div>
         ${verdictBanner(a.verdict, punish)}
         ${pop}
+        ${engineNote}
         ${text}
       </div>${over}`;
   }
@@ -2029,9 +2040,65 @@ function freeView() {
     if (!rows.length && ex && ex !== 'loading' && !(ex.data && ex.data.moves.length)) {
       for (const m of sensibleMoves(f)) rows.push({ san: m.san, coachPick: true });
     }
+    // «результат» — сколько очков набирал тот, кто так сыграл (победа — 1, ничья — ½); только если партий хватает
+    const mover = turnAt(f);
     return rows
-      .map((r) => ({ ...r, move: sanToMove(f, r.san), share: total && r.n ? r.n / total : null }))
+      .map((r) => ({
+        ...r,
+        move: sanToMove(f, r.san),
+        share: total && r.n ? r.n / total : null,
+        score: r.n >= 30 ? ((mover === 'w' ? r.w : r.b) + r.d / 2) / r.n : null,
+      }))
       .filter((r) => r.move);
+  }
+
+  // ─── лучшие ходы по движку Stockfish ───
+
+  const engineLines = new Map(); // позиция → [линии] | 'loading' | { error }
+  let listMode = store.settings.freeList === 'best' ? 'best' : 'popular';
+  const uciOf = (m) => m.from + m.to + (m.promotion || '');
+
+  function ensureEngine(f, multipv) {
+    if (engineLines.has(f)) return;
+    engineLines.set(f, 'loading');
+    engine
+      .analyse(f, { multipv })
+      .then((lines) => engineLines.set(f, lines))
+      .catch((error) => (error.message === 'cancelled' ? engineLines.delete(f) : engineLines.set(f, { error })))
+      .finally(() => {
+        if (alive && fen() === f) render();
+      });
+  }
+
+  // Добавить к ходам оценку движка; в режиме «лучшие» — порядок движка и его ходы, которых нет в списке.
+  function withEngine(rows, f) {
+    const lines = engineLines.get(f);
+    if (!Array.isArray(lines) || !lines.length) return rows;
+    const best = engine.scoreOf(lines[0]);
+    const byUci = new Map(lines.map((l) => [l.uci, l]));
+    const tag = (l) => (l ? { line: l, delta: best - engine.scoreOf(l) } : null);
+    const out = rows.map((r) => ({ ...r, eng: tag(byUci.get(uciOf(r.move))) }));
+    if (listMode !== 'best') return out;
+    const have = new Set(out.map((r) => uciOf(r.move)));
+    for (const l of lines) {
+      if (have.has(l.uci)) continue;
+      const mv = sanToMove(f, { from: l.uci.slice(0, 2), to: l.uci.slice(2, 4), promotion: l.uci[4] });
+      if (mv) out.push({ san: mv.san, move: mv, engineOnly: true, eng: tag(l) });
+    }
+    return out.sort((a, b) => (a.eng ? a.eng.line.rank : 99) - (b.eng ? b.eng.line.rank : 99));
+  }
+
+  // Оценка движка после хода — кто лучше и насколько: «+0.3 у белых · лучший ход».
+  // Движок считает с точки зрения того, кто ходит; переводим в «у белых / у чёрных».
+  function engineChip({ line, delta }, mover = turnAt(fen())) {
+    const name = (c) => (c === 'w' ? 'белых' : 'чёрных');
+    const other = mover === 'w' ? 'b' : 'w';
+    let v;
+    if (line.mate != null) v = line.mate > 0 ? `мат в ${line.mate} у ${name(mover)}` : `мат в ${-line.mate} у ${name(other)}`;
+    else if (Math.abs(line.cp) < 30) v = '≈ поровну';
+    else v = `+${(Math.abs(line.cp) / 100).toFixed(1)} у ${name(line.cp > 0 ? mover : other)}`;
+    const [cls, word] = line.rank === 1 ? ['e-best', 'лучший ход'] : delta <= 30 ? ['e-good', 'почти так же хорош'] : delta <= 100 ? ['e-ok', 'чуть хуже'] : ['e-bad', 'заметно хуже'];
+    return `<span class="c-chip ${cls}">🤖 ${v} · ${word}</span>`;
   }
 
   const sensibleCache = new Map();
@@ -2059,11 +2126,16 @@ function freeView() {
   }
 
   function candidateArrows(rows, mine) {
+    const byEngine = listMode === 'best' && rows.some((r) => r.eng);
     return rows.slice(0, 6).map((r) => ({
       orig: r.move.from,
       dest: r.move.to,
       brush: mine ? 'candMine' : 'cand',
-      modifiers: { lineWidth: r.share != null ? Math.round(3 + 13 * Math.min(1, r.share * 1.4)) : 8 },
+      modifiers: {
+        lineWidth: byEngine
+          ? r.eng ? [15, 11, 8, 6, 5][r.eng.line.rank - 1] || 4 : 3
+          : r.share != null ? Math.round(3 + 13 * Math.min(1, r.share * 1.4)) : 8,
+      },
     }));
   }
 
@@ -2072,8 +2144,21 @@ function freeView() {
     const ex = explorerData.get(fen());
     const total = ex && ex.data ? ex.data.total : 0;
     const title = mine
-      ? `💡 Что здесь чаще играют ${sideName(turn)}`
+      ? `💡 Что здесь играют ${sideName(turn)}`
       : `Выбери ответ соперника (${turn === 'w' ? 'белые' : 'чёрные'}):`;
+    const lines = engineLines.get(fen());
+    const modes = `<div class="list-mode" role="tablist">
+        <button type="button" role="tab" data-mode="popular" class="${listMode === 'popular' ? 'on' : ''}" aria-selected="${listMode === 'popular'}">🔥 Популярные</button>
+        <button type="button" role="tab" data-mode="best" class="${listMode === 'best' ? 'on' : ''}" aria-selected="${listMode === 'best'}">🏆 Лучшие</button>
+      </div>`;
+    const engineStatus =
+      listMode !== 'best'
+        ? ''
+        : lines === 'loading'
+          ? `<p class="muted small engine-busy">🤖 ${engine.engineState.status === 'loading' ? 'Загружаю движок Stockfish — один раз, около 7 МБ…' : 'Движок считает лучшие ходы…'}</p>`
+          : lines && lines.error
+            ? `<p class="muted small">🤖 Движок не запустился (${esc(lines.error.message)}). Показываю ходы по результату в партиях.</p>`
+            : '';
     const loading = ex === 'loading' ? '<p class="muted small">Загружаю статистику Lichess…</p>' : '';
     const noStats =
       ex && ex.error
@@ -2088,7 +2173,12 @@ function freeView() {
             const bar = n
               ? `<span class="wdb"><i class="w" style="width:${(r.w / n) * 100}%"></i><i class="d" style="width:${(r.d / n) * 100}%"></i><i class="b" style="width:${(r.b / n) * 100}%"></i></span>`
               : '';
-            const note = r.book ? `<span class="c-note">★ ${r.book.labels.slice(0, 2).map(esc).join(' · ')}</span>` : '';
+            const chips = [];
+            if (r.book) chips.push(`<span class="c-chip book">★ ${r.book.labels.slice(0, 2).map(esc).join(' · ')}</span>`);
+            if (r.score != null) chips.push(`<span class="c-chip score">🏆 ${Math.round(r.score * 100)}% очков</span>`);
+            if (r.eng) chips.push(engineChip(r.eng));
+            else if (listMode === 'best' && Array.isArray(lines)) chips.push('<span class="c-chip e-bad">🤖 не в числе лучших</span>');
+            const note = chips.length ? `<span class="c-chips">${chips.join('')}</span>` : '';
             // зачем этот ход: из урока, а если его нет в базе — короткая идея от тренера
             const idea = (r.book && r.book.text) || coach.moveIdea(fen(), r.move);
             const ideaHtml = idea ? `<span class="c-idea">${richInButton(idea)}</span>` : '';
@@ -2100,7 +2190,11 @@ function freeView() {
       : `<p class="muted">${ex === 'loading' ? '' : 'Ни в нашей базе, ни в статистике нет ходов для этой позиции.'} Сделай ход за ${mine ? 'себя' : 'соперника'} на доске сам.</p>`;
     return `<div class="cands">
         <div class="cands-title">${title}</div>
+        ${modes}
+        ${engineStatus}
         ${list}
+        ${rows.some((r) => r.eng) ? '<p class="muted small">🤖 Оценка движка Stockfish после хода: «+1.0 у белых» — у белых перевес примерно в лишнюю пешку, «≈ поровну» — силы равны. «Лучший ход» — самый сильный по мнению движка; в начале партии у белых обычно небольшой плюс.</p>' : ''}
+        ${rows.some((r) => r.score != null) ? '<p class="muted small">🏆 % очков — как часто сыгравшие так выигрывали (ничья — пол-очка). Это практика любителей: иногда ход «выигрывает» просто из-за ошибок соперников.</p>' : ''}
         ${rows.some((r) => r.coachPick) ? '<p class="muted small">Статистики для этой позиции нет — это ходы, которые тренер считает разумными.</p>' : ''}
         ${rows.some((r) => r.n) ? `<p class="muted small">% — как часто так играют: ${ex.data.source === 'local' ? `встроенная статистика по ${ex.data.total.toLocaleString('ru-RU')} ${plural(ex.data.total, 'партии', 'партиям', 'партиям')} с Lichess` : 'Lichess, игроки 1400–2000'}. Полоска: победы белых / ничьи / победы чёрных. ★ — ход из нашей базы.</p>` : ''}
         ${ex && ex.data && ex.data.lichessError ? '<p class="muted small">Свежая статистика Lichess: <button type="button" class="link-btn" id="ex-help-btn">подключить</button></p><div id="ex-help"></div>' : ''}
@@ -2166,6 +2260,10 @@ function freeView() {
     if (!over) loadExplorer();
     if (cursor > 0) loadExplorer(cursor - 1);
     rows = over ? [] : candidates();
+    if (!over) {
+      if (listMode === 'best') ensureEngine(f, Math.min(8, Math.max(5, rows.length)));
+      rows = withEngine(rows, f);
+    }
     board.setMarks(applyShapes().marks);
     app.querySelector('#dots').innerHTML = materialChip(f, side);
     topbar.querySelector('.title').textContent = openingTitle();
@@ -2298,6 +2396,14 @@ function freeView() {
       },
       { passive: true },
     );
+    body.querySelectorAll('.list-mode [data-mode]').forEach((b) => {
+      b.onclick = () => {
+        if (listMode === b.dataset.mode) return;
+        listMode = b.dataset.mode;
+        store.saveSettings({ freeList: listMode });
+        render();
+      };
+    });
     body.querySelectorAll('.cand').forEach((b) => {
       const r = rows[+b.dataset.k];
       b.onclick = () => playMove(r.move);
