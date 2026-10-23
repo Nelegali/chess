@@ -1405,9 +1405,19 @@ cg-board square.check {
   .dots {
     margin: 6px 0 10px;
   }
+  /* Размер доски на телефоне: под ней должно оставаться ~230px — строка кнопок и объяснение хода
+     целиком (у 9 из 10 ходов оно не выше 172px). Но не меньше 260px, чтобы было удобно ходить. */
+  :root {
+    --phone-board: min(100vw, max(260px, calc(100vh - 350px)));
+  }
+  @supports (height: 100svh) {
+    :root {
+      --phone-board: min(100vw, max(260px, calc(100svh - 350px)));
+    }
+  }
   .board {
-    max-width: min(100%, calc(100vh - 290px));
-    max-width: min(100%, calc(100svh - 290px));
+    max-width: min(100%, var(--phone-board));
+    border-radius: 4px;
   }
   .legend {
     padding: 0 12px;
@@ -2127,8 +2137,7 @@ body[data-view='drill'] .update-bar {
   /* Прокрутка к элементу (scrollIntoView, переход по Tab) не должна прятать его под закреплённой доской. */
   html:has(.play.lesson),
   html:has(.play.quiz) {
-    scroll-padding-top: calc(var(--topbar-h, 53px) + min(100vw, calc(100vh - 290px)));
-    scroll-padding-top: calc(var(--topbar-h, 53px) + min(100vw, calc(100svh - 290px)));
+    scroll-padding-top: calc(var(--topbar-h, 53px) + var(--phone-board));
   }
   /* в викторине доска тоже стоит на месте, пока листаешь варианты ответа */
   .play.quiz .board-col {
