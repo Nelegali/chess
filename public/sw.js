@@ -1,6 +1,6 @@
 // Офлайн-режим: файлы приложения кэшируются, обновления подтягиваются в фоне.
-// При изменении файлов увеличь VERSION, чтобы телефоны быстрее получили новую версию.
-const VERSION = 'v5';
+// VERSION совпадает с версией приложения (js/version.js) — при выпуске обновления меняй обе.
+const VERSION = '1.7.0';
 const CACHE = `chess-openings-${VERSION}`;
 const SHELL = [
   './',
@@ -16,6 +16,7 @@ const SHELL = [
   'js/theory.js',
   'js/coach.js',
   'js/alternatives.js',
+  'js/version.js',
   'vendor/chess.js',
   'vendor/chessground.js',
   'vendor/chessground.base.css',
@@ -47,7 +48,8 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/')) return;
+  // version.json всегда берём из сети: по нему приложение узнаёт, что вышло обновление.
+  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/') || url.pathname.endsWith('version.json')) return;
   // stale-while-revalidate: сразу отдаём из кэша, а в фоне обновляем.
   e.respondWith(
     caches.open(CACHE).then(async (cache) => {

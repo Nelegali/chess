@@ -98,6 +98,7 @@ export class Board {
     this.myColor = myColor;
     this.insightOn = false; // показывать все ходы соперника и фигуры под ударом
     this.focus = null; // фигура соперника, которую нажали, — показываем её ходы
+    this.hint = null; // клетка фигуры, которой ученику нужно ходить (мигает)
     this.chess = new Chess();
     this.cg = Chessground(el, {
       fen: this.chess.fen(),
@@ -114,7 +115,17 @@ export class Board {
         showDests: true,
         events: { after: (orig, dest) => this.handleMove(orig, dest) },
       },
-      drawable: { enabled: true, visible: true, defaultSnapToValidMove: true },
+      drawable: {
+        enabled: true,
+        visible: true,
+        defaultSnapToValidMove: true,
+        // кисти для режима «куда может пойти соперник»
+        brushes: {
+          oppMove: { key: 'om', color: '#4a4a4a', opacity: 0.5, lineWidth: 4 },
+          oppMoveStrong: { key: 'oms', color: '#3a3a3a', opacity: 0.8, lineWidth: 7 },
+          oppCapture: { key: 'oc', color: '#d0021b', opacity: 0.9, lineWidth: 8 },
+        },
+      },
       events: { select: (key) => this.onSelect(key) },
     });
   }
@@ -129,6 +140,12 @@ export class Board {
     this.renderInsight();
   }
 
+  setHint(square) {
+    if (this.hint === square) return;
+    this.hint = square;
+    this.renderInsight();
+  }
+
   setInsight(on) {
     this.insightOn = on;
     this.renderInsight();
@@ -138,13 +155,33 @@ export class Board {
     const map = new Map();
     const add = (sq, cls) => map.set(sq, map.has(sq) ? `${map.get(sq)} ${cls}` : cls);
     const enemy = this.myColor === 'w' ? 'b' : 'w';
+    const arrows = [];
     if (this.insightOn || this.focus) {
       const all = movesFor(this.chess, enemy);
       const shown = this.focus ? all.filter((m) => m.from === this.focus) : all;
-      const targets = new Set(shown.map((m) => m.to));
-      for (const sq of targets) add(sq, this.focus ? 'opp-move strong' : 'opp-move');
+      const seen = new Set();
+      for (const m of shown) {
+        if (seen.has(m.from + m.to)) continue; // превращения дают несколько одинаковых ходов
+        seen.add(m.from + m.to);
+        const brush = m.captured ? 'oppCapture' : this.focus ? 'oppMoveStrong' : 'oppMove';
+        arrows.push({ orig: m.from, dest: m.to, brush });
+      }
+      // Пешка ходит прямо, а бьёт наискосок: клетки, которые она бьёт, отмечаем точкой.
+      for (const sq of SQUARES) {
+        const p = this.chess.get(sq);
+        if (!p || p.color !== enemy || p.type !== 'p' || (this.focus && this.focus !== sq)) continue;
+        const file = sq.charCodeAt(0);
+        const rank = +sq[1] + (enemy === 'w' ? 1 : -1);
+        if (rank < 1 || rank > 8) continue;
+        for (const df of [-1, 1]) {
+          const f = file + df;
+          if (f < 97 || f > 104) continue;
+          const target = String.fromCharCode(f) + rank;
+          if (!this.chess.get(target)) add(target, 'opp-pawn');
+        }
+      }
       if (this.focus) add(this.focus, 'opp-focus');
-      // Наши фигуры под ударом: красное кольцо — без защиты (или бьёт фигура дешевле), оранжевое — защищена.
+      // Наши фигуры под ударом: красная рамка — без защиты (или бьёт фигура дешевле), оранжевая — защищена.
       for (const sq of SQUARES) {
         const p = this.chess.get(sq);
         if (!p || p.color !== this.myColor) continue;
@@ -156,7 +193,19 @@ export class Board {
         add(sq, !defended || cheapest < VALUE[p.type] ? 'attacked' : 'guarded');
       }
     }
+    if (this.hint) add(this.hint, 'hint-from');
+    this.insightShapes = arrows;
+    if (this.previewing) return;
     this.cg.set({ highlight: { custom: map } });
+    this.applyShapes();
+  }
+
+  // Стрелки на доске = стрелки урока + стрелки режима соперника + временные (подсветка клетки).
+  applyShapes(extra = []) {
+    const base = this.baseShapes || [];
+    const seen = new Set(base.map((x) => x.orig + (x.dest || '')));
+    const insight = (this.insightShapes || []).filter((x) => !seen.has(x.orig + x.dest));
+    this.cg.setAutoShapes([...insight, ...base, ...extra]);
   }
 
   handleMove(orig, dest) {
@@ -186,6 +235,10 @@ export class Board {
 
   sync(lastMove) {
     this.focus = null;
+    this.lastMove = lastMove;
+    this.movableColor = null;
+    this.previewing = false;
+    clearTimeout(this.previewTimer);
     this.cg.set({
       fen: this.chess.fen(),
       turnColor: this.chess.turn() === 'w' ? 'white' : 'black',
@@ -198,6 +251,7 @@ export class Board {
 
   // Разрешить пользователю ходить за цвет color ('w'/'b').
   enable(color) {
+    this.movableColor = color;
     this.cg.set({
       movable: {
         color: color === 'w' ? 'white' : 'black',
@@ -207,6 +261,7 @@ export class Board {
   }
 
   disable() {
+    this.movableColor = null;
     this.cg.set({ movable: { color: undefined, dests: new Map() } });
   }
 
@@ -217,7 +272,36 @@ export class Board {
   }
 
   shapes(list) {
-    this.cg.setAutoShapes(list);
+    this.baseShapes = list;
+    clearTimeout(this.flashTimer);
+    if (!this.previewing) this.applyShapes();
+  }
+
+  // Предпросмотр «что будет»: временно показать другую позицию со стрелками.
+  preview({ fen, lastMove, shapes }) {
+    if (!this.el.isConnected) return;
+    clearTimeout(this.flashTimer);
+    this.previewing = true;
+    this.cg.set({ fen, lastMove, check: false, movable: { color: undefined, dests: new Map() }, highlight: { custom: new Map() } });
+    this.cg.setAutoShapes(shapes);
+  }
+
+  endPreview() {
+    if (!this.previewing || !this.el.isConnected) return;
+    this.previewing = false;
+    this.cg.set({ fen: this.chess.fen(), lastMove: this.lastMove, check: this.chess.inCheck() });
+    if (this.movableColor) this.enable(this.movableColor);
+    this.renderInsight();
+  }
+
+  // Ненадолго подсветить клетки (когда в тексте нажали на «f7»).
+  flash(squares) {
+    if (!this.el.isConnected || this.previewing) return;
+    clearTimeout(this.flashTimer);
+    this.applyShapes(squares.map((sq) => ({ orig: sq, brush: 'blue' })));
+    this.flashTimer = setTimeout(() => {
+      if (!this.previewing && this.el.isConnected) this.applyShapes();
+    }, 1800);
   }
 
   orientation(o) {
@@ -231,6 +315,8 @@ export class Board {
   }
 
   destroy() {
+    clearTimeout(this.flashTimer);
+    clearTimeout(this.previewTimer);
     this.cg.destroy();
   }
 }

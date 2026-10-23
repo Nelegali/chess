@@ -4,6 +4,8 @@
 import { Chess } from '../public/vendor/chess.js';
 import { OPENINGS } from '../public/js/openings.js';
 import { ALTERNATIVES } from '../public/js/alternatives.js';
+import { APP_VERSION } from '../public/js/version.js';
+import { readFileSync } from 'node:fs';
 
 const SQ = /^[a-h][1-8]$/;
 const errors = [];
@@ -90,9 +92,16 @@ for (const [lineId, byPly] of Object.entries(ALTERNATIVES)) {
   }
 }
 
+// Версия приложения одинакова в version.js, version.json и sw.js
+const versionJson = JSON.parse(readFileSync(new URL('../public/version.json', import.meta.url), 'utf8')).version;
+const swVersion = (readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8').match(/const VERSION = '([^']+)'/) || [])[1];
+if (versionJson !== APP_VERSION || swVersion !== APP_VERSION) {
+  errors.push(`версии не совпадают: version.js=${APP_VERSION}, version.json=${versionJson}, sw.js=${swVersion}`);
+}
+
 if (errors.length) {
   console.error(errors.join('\n'));
   console.error(`\n✗ ошибок: ${errors.length}`);
   process.exit(1);
 }
-console.log(`✓ ${OPENINGS.length} дебютов, ${lines} линий, ${moves} ходов, ${altCount} ручных пояснений — всё легально`);
+console.log(`✓ версия ${APP_VERSION}; ${OPENINGS.length} дебютов, ${lines} линий, ${moves} ходов, ${altCount} ручных пояснений — всё легально`);

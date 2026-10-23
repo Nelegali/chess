@@ -50,6 +50,7 @@ for (const opening of OPENINGS) {
           san: new Chess(before).move(clean(first.m)).san,
           annotation: (first.m.match(/[!?]+$/) || [''])[0],
           text: first.t,
+          arrows: first.a,
           opening,
           line,
           altDef: def,
@@ -60,6 +61,7 @@ for (const opening of OPENINGS) {
         san: m.san,
         annotation: (step.m.match(/[!?]+$/) || [''])[0],
         text: step.t,
+        arrows: step.a,
         opening,
         line,
         ply,
@@ -68,6 +70,38 @@ for (const opening of OPENINGS) {
       });
     }
   }
+}
+
+// ─── предпросмотр «что будет» ───
+
+const BRUSH = { g: 'green', r: 'red', b: 'blue', y: 'yellow' };
+function parseArrows(str) {
+  if (!str) return [];
+  return str
+    .trim()
+    .split(/\s+/)
+    .map((t) => (t.length === 5 ? { orig: t.slice(1, 3), dest: t.slice(3, 5), brush: BRUSH[t[0]] } : { orig: t.slice(1, 3), brush: BRUSH[t[0]] }));
+}
+
+// Позиция после ходов sans (первый — наш вариант, второй — ответ соперника) со стрелками.
+export function previewLine(fenBefore, sans, arrows, firstBrush = 'blue', replyBrush = 'red') {
+  const c = new Chess(fenBefore);
+  const shapes = [];
+  const played = [];
+  let lastMove;
+  for (const [i, san] of sans.entries()) {
+    let m;
+    try {
+      m = c.move(clean(san));
+    } catch {
+      break;
+    }
+    played.push(m.san);
+    shapes.push({ orig: m.from, dest: m.to, brush: i === 0 ? firstBrush : replyBrush });
+    lastMove = [m.from, m.to];
+  }
+  if (sans.length === 1) shapes.push(...parseArrows(arrows));
+  return { fen: c.fen(), lastMove, shapes, sans: played };
 }
 
 // ─── материал под ударом ───
@@ -129,7 +163,14 @@ const isCastle = (m) => m.flags.includes('k') || m.flags.includes('q');
 //
 // fenBefore — позиция до хода; alt — ход, который хотим объяснить (объект chess.js);
 // theory — ход по теории (объект chess.js); reveal — можно ли упоминать правильный ход.
-export function explain(fenBefore, alt, theory, { lineId, ply, reveal = true } = {}) {
+export function explain(fenBefore, alt, theory, opts = {}) {
+  const r = explainCore(fenBefore, alt, theory, opts);
+  const reply = r.demo && r.demo[1] ? r.demo[1].m : null;
+  r.preview = previewLine(fenBefore, reply ? [alt.san, reply] : [alt.san], r.arrows, r.verdict === 'good' ? 'green' : 'blue');
+  return r;
+}
+
+function explainCore(fenBefore, alt, theory, { lineId, ply, reveal = true } = {}) {
   const fullmove = +fenBefore.split(' ')[5];
   const side = alt.color;
   const altFig = fig(alt.san);
@@ -170,11 +211,12 @@ export function explain(fenBefore, alt, theory, { lineId, ply, reveal = true } =
         text: authored || (known.altDef ? known.altDef.intro || known.text : known.text),
         demo: known.altDef ? known.altDef.steps : null,
         demoLabel: known.altDef ? known.altDef.label : null,
+        arrows: known.arrows,
       };
     }
     if (known.trap && known.side !== side) {
       // ход «ставящей ловушку» стороны в линии, где ученик защищается, — сомнительный
-      return result('dubious', known.text);
+      return { ...result('dubious', known.text), arrows: known.arrows };
     }
     if (!(lineId && known.line.id === lineId)) {
       const sameOpening = theory && OPENINGS.find((o) => o.lines.some((l) => l.id === lineId))?.id === known.opening.id;
@@ -306,12 +348,15 @@ export function alternatives(fenBefore, theory, { lineId, ply, stepAlt = [] } = 
     const first = new Chess(fenBefore).move(clean(def.steps[0].m));
     const annotation = (def.steps[0].m.match(/[!?]+$/) || [''])[0];
     const manual = ALTERNATIVES[lineId]?.[ply]?.[first.san];
+    const verdict = (manual && manual.v) || { '??': 'blunder', '?': 'mistake', '?!': 'dubious' }[annotation] || 'good';
+    const reply = def.steps[1] ? def.steps[1].m : null;
     push({
       san: first.san,
-      verdict: (manual && manual.v) || { '??': 'blunder', '?': 'mistake', '?!': 'dubious' }[annotation] || 'good',
+      verdict,
       text: (manual && (manual.t || manual)) || def.intro || def.steps[0].t,
       demo: def.steps,
       demoLabel: def.label,
+      preview: previewLine(fenBefore, reply ? [first.san, reply] : [first.san], def.steps[0].a, verdict === 'good' ? 'green' : 'blue'),
     });
   }
   // ручные пояснения

@@ -6,6 +6,7 @@ import { play as sound } from './sound.js';
 import * as lichess from './lichess.js';
 import { BASICS, GLOSSARY, GLOSSARY_BY_ID, OPENING_THEORY, DIAGRAMS, linkTerms } from './theory.js';
 import * as coach from './coach.js';
+import { APP_VERSION, APP_DATE } from './version.js';
 
 const app = document.getElementById('app');
 const topbar = document.getElementById('topbar');
@@ -25,8 +26,15 @@ const figText = (s) =>
     .replace(/\.\.\./g, '…')
     .replace(/(^|[^A-Za-zА-Яа-яЁё])([KQRBN])([a-h]?[1-8]?x?[a-h][1-8])/g, (m, pre, p, rest) => pre + FIG_TEXT[p] + rest);
 
-// Экранированный текст, где термины из словаря — нажимаемые кнопки.
-const rich = (s) => linkTerms(figText(esc(s)));
+// Названия клеток (f7, e4…) — нажимаемые: подсвечивают клетку на доске.
+const squaresText = (s) =>
+  s.replace(/(^|[^A-Za-z0-9_])([a-h][1-8])(?![A-Za-z0-9])/g, (m, pre, sq) => `${pre}<span class="sq" data-sq="${sq}">${sq}</span>`);
+
+// Экранированный текст, где термины из словаря — нажимаемые кнопки, а клетки подсвечиваются.
+const rich = (s) => linkTerms(squaresText(figText(esc(s))));
+
+// Доска текущего экрана — на ней подсвечиваются клетки из текста.
+let activeBoard = null;
 
 // Пометки к ходам (!, ?, ?!) словами — новичку значки ничего не говорят.
 const ANN = { '??': 'грубая ошибка', '?': 'ошибка', '?!': 'сомнительный ход', '!?': 'интересный ход', '!': 'сильный ход', '!!': 'блестящий ход' };
@@ -302,6 +310,7 @@ function homeView() {
     </div>
     <div class="grid" id="grid"></div>
     <p class="legend-note muted">★ — насколько часто встречается у любителей · ● — сложность</p>
+    <p class="version-note muted">${versionText()}</p>
   `;
 
   const installClose = app.querySelector('#install-close');
@@ -443,11 +452,14 @@ function playLayout(opening, line, mode) {
     <div class="play">
       <div class="board-col">
         <div class="board" id="board"></div>
+        <div class="preview-badge" id="preview-badge" hidden></div>
         <div class="board-tools">
           <button type="button" class="btn tiny insight-btn" id="insight-btn" aria-pressed="false">👁 Куда может пойти соперник</button>
         </div>
         <p class="insight-legend" id="insight-legend" hidden>
-          <span><i class="ins dot"></i>сюда может пойти соперник</span>
+          <span><i class="ins line"></i>куда может пойти фигура соперника</span>
+          <span><i class="ins line cap"></i>кого она может съесть</span>
+          <span><i class="ins dot"></i>клетку бьёт пешка соперника</span>
           <span><i class="ins ring"></i>твоя фигура под ударом</span>
           <span><i class="ins ring guarded"></i>под ударом, но защищена</span>
           <span class="muted">Нажми на фигуру соперника — покажу только её ходы.</span>
@@ -472,6 +484,14 @@ function playLayout(opening, line, mode) {
         <div id="panel-body"></div>
       </div>
     </div>`;
+}
+
+// Как сделать ход: понятная подсказка для новичка.
+const ACC_PIECE = { p: 'пешку', n: 'коня', b: 'слона', r: 'ладью', q: 'ферзя', k: 'короля' };
+function howToMove(m) {
+  const castle = m.flags.includes('k') || m.flags.includes('q');
+  const what = castle ? `Рокировка: перетащи короля с ${m.from} на ${m.to}` : `Перетащи ${ACC_PIECE[m.piece]} с ${m.from} на ${m.to}`;
+  return `${what} (или нажми на фигуру, а потом на клетку). Можно и кнопкой «Сделать ход» внизу.`;
 }
 
 // Кнопка «Куда может пойти соперник»: включённое состояние запоминается.
@@ -516,12 +536,45 @@ function learnView(lineId) {
   const board = new Board(app.querySelector('#board'), { orientation: colorName(side), myColor: side, onUserMove });
   onCleanup(() => board.destroy());
   setupInsight(board);
+  activeBoard = board;
+  onCleanup(() => (activeBoard = null));
 
   let ply = 0;
   let alt = null; // { def, fens, moves, ply, base }
   let explorerOpen = false;
   let wrongMsg = '';
   let lastWrong = null;
+
+  // «Идея дебюта»: перед первым ходом показываем на доске, к какой позиции придём и зачем.
+  const essence = DIAGRAMS[opening.id]?.essence;
+  let intro = !!essence;
+  let essencePos = null;
+  if (essence) {
+    const l = opening.lines[essence.line || 0];
+    const built = buildLine(l.steps.slice(0, essence.ply));
+    essencePos = { fen: built.fens[built.fens.length - 1], last: built.moves[built.moves.length - 1] };
+  }
+
+  function renderIntro() {
+    const last = essencePos.last;
+    board.load(essencePos.fen, last ? [last.from, last.to] : undefined);
+    board.shapes(parseArrows(essence.a));
+    renderDots(dots, N, -1, side, fens);
+    body.innerHTML = `
+      <div class="move-card intro-card">
+        <div class="move-head"><span class="san">Идея дебюта</span><span class="who me">ты играешь ${sideName(side)}</span></div>
+        <div class="idea-box"><b>👆 На доске:</b> ${rich(essence.caption)}</div>
+        <p class="explain">${rich(opening.about)}</p>
+        <p class="explain muted">Это позиция, к которой мы придём. Теперь сыграем дебют с первого хода: свои ходы делай на доске сам — зелёная стрелка подскажет, а ходы соперника появятся по кнопке.</p>
+      </div>
+      <div class="actionbar">
+        <button class="btn nav" id="prev" disabled aria-label="Назад">◀</button>
+        <button class="btn primary" id="start">▶ Начать с первого хода</button>
+        <button class="btn nav" id="next" aria-label="Вперёд">▶</button>
+      </div>`;
+    body.querySelector('#start').onclick = forward;
+    body.querySelector('#next').onclick = forward;
+  }
 
   function currentFen() {
     return alt ? alt.fens[alt.ply] : fens[ply];
@@ -546,12 +599,14 @@ function learnView(lineId) {
 
   function render() {
     if (alt) return renderAlt();
+    if (intro) return renderIntro();
     const step = ply > 0 ? line.steps[ply - 1] : null;
     const last = ply > 0 ? moves[ply - 1] : null;
     board.load(fens[ply], last ? [last.from, last.to] : undefined);
     const next = ply < N ? moves[ply] : null;
     const myTurn = next && turnAt(fens[ply]) === side;
     board.shapes(shapesFor(step, fens[ply], myTurn ? next : null));
+    board.setHint(myTurn && store.settings.hints ? next.from : null);
     if (myTurn) board.enable(side);
     renderDots(dots, N, ply, side, fens);
 
@@ -561,7 +616,7 @@ function learnView(lineId) {
       : `<div class="move-head"><span class="san">Начало</span><span class="who me">ты играешь ${sideName(side)}</span></div>`;
     const text = step
       ? `<p class="explain">${rich(step.t)}</p>`
-      : `<p class="explain">${rich(opening.about)}</p><p class="explain muted">Ходи на доске сам — зелёная стрелка подскажет. Ходы соперника появятся по кнопке. После каждого хода читай объяснение и смотри на стрелки.</p>`;
+      : `<p class="explain">Начинаем с исходной позиции. Ходи на доске сам — зелёная стрелка подскажет. Ходы соперника появятся по кнопке. После каждого хода читай объяснение и смотри на стрелки.</p>${essence ? '<p class="explain muted">Кнопка ◀ вернёт к идее дебюта.</p>' : ''}`;
 
     let prompt = '';
     let mainBtn = '';
@@ -571,12 +626,12 @@ function learnView(lineId) {
     } else if (myTurn) {
       const nextStep = line.steps[ply];
       prompt = `<div class="prompt mine">
-          <div>Твой ход: <b>${figurine(clean(nextStep.m))}</b> ${store.settings.hints ? '— сыграй его на доске по зелёной стрелке' : '— сыграй его на доске'}</div>
+          <div>Твой ход: <b>${figurine(clean(nextStep.m))}</b>. ${howToMove(next)}</div>
           <div class="why"><span class="why-label">Зачем этот ход</span>${rich(nextStep.t)}</div>
         </div>
-        ${wrongMsg ? `<div class="wrong-msg">${wrongMsg}</div>` : ''}
+        ${wrongMsg ? `<div class="wrong-msg" data-wrong="1">${wrongMsg}</div>` : ''}
         ${whyNotBlock()}`;
-      mainBtn = '<button class="btn" id="auto">💡 Сделать ход за меня</button>';
+      mainBtn = `<button class="btn" id="auto">▶ Сделать ход ${figurine(clean(nextStep.m))}</button>`;
     } else {
       mainBtn = '<button class="btn primary" id="opp">Ход соперника ▶</button>';
     }
@@ -604,7 +659,7 @@ function learnView(lineId) {
       ${prompt}
       ${explorerBlock()}
       <div class="actionbar">
-        <button class="btn nav" id="prev" ${ply === 0 ? 'disabled' : ''} aria-label="Назад">◀</button>
+        <button class="btn nav" id="prev" ${ply === 0 && !essence ? 'disabled' : ''} aria-label="Назад">◀</button>
         ${mainBtn}
         <button class="btn nav" id="next" ${!next ? 'disabled' : ''} aria-label="Вперёд">▶</button>
       </div>
@@ -628,6 +683,7 @@ function learnView(lineId) {
     }
     const wd = body.querySelector('#wrong-demo');
     if (wd) wd.onclick = () => startDemo(lastWrong);
+    bindPreviews();
     const fin = body.querySelector('#finish');
     if (fin) fin.onclick = finish;
     const opp = body.querySelector('#opp');
@@ -656,15 +712,87 @@ function learnView(lineId) {
             <div class="wn-head"><b class="wn-san">${moveLabel(ply, c.san)}</b>${verdictBadge(c.verdict)}</div>
             ${c.demoLabel ? `<div class="wn-label">${esc(c.demoLabel)}</div>` : ''}
             <p>${rich(c.text)}</p>
-            ${c.demo ? `<button type="button" class="btn tiny" data-wn="${i}">▶ Показать на доске</button>` : ''}
+            <div class="wn-actions">
+              <button type="button" class="btn tiny" data-peek="${i}">👀 Что будет на доске</button>
+              ${c.demo ? `<button type="button" class="btn tiny" data-wn="${i}">▶ Разыграть по ходам</button>` : ''}
+            </div>
+            <div class="wn-preview" hidden></div>
           </div>`,
         )
         .join('')}</div>
     </details>`;
   }
 
+  // Предпросмотр «что будет»: наведение мышью — на большой доске; кнопка — мини-доска в карточке
+  // (на телефоне большая доска выше и её не видно рядом с карточкой).
+  const badge = app.querySelector('#preview-badge');
+  function previewLabel(pv, startPly) {
+    return pv.sans.map((san, k) => moveLabel(startPly + k, san)).join(' → ');
+  }
+  function showPreview(pv, startPly) {
+    board.preview(pv);
+    badge.textContent = `👀 ${previewLabel(pv, startPly)}`;
+    badge.hidden = false;
+  }
+  function hidePreview() {
+    board.endPreview();
+    badge.hidden = true;
+  }
+  function bindPreviews() {
+    badge.hidden = true;
+    const list = myTurnNow() ? whyNotList() : [];
+    const items = [
+      ...[...body.querySelectorAll('.wn-item')].map((el, i) => ({ el, c: list[i], startPly: ply })),
+      ...[...body.querySelectorAll('[data-wrong]')].map((el) => ({ el, c: lastWrong, startPly: ply })),
+    ].filter((x) => x.c && x.c.preview);
+    for (const { el, c, startPly } of items) {
+      hoverPreview(el, () => showPreview(c.preview, startPly));
+      const btn = el.querySelector('[data-peek]');
+      const box = el.querySelector('.wn-preview');
+      if (!btn || !box) continue;
+      btn.onclick = () => {
+        if (!box.dataset.mounted) {
+          box.innerHTML = `<div class="wn-preview-board"></div><p class="muted small">${previewLabel(c.preview, startPly)}. Синяя стрелка — этот ход, красная — ответ соперника.</p>`;
+          miniBoard(box.querySelector('.wn-preview-board'), c.preview.fen, colorName(side), c.preview.lastMove, c.preview.shapes, true);
+          box.dataset.mounted = '1';
+        }
+        box.hidden = !box.hidden;
+        btn.textContent = box.hidden ? '👀 Что будет на доске' : 'Скрыть доску';
+      };
+    }
+    // «А если бы соперник сыграл иначе?» — предпросмотр при наведении
+    const step = ply > 0 ? line.steps[ply - 1] : null;
+    body.querySelectorAll('[data-alt]').forEach((el) => {
+      const def = step && step.alt ? step.alt[+el.dataset.alt] : null;
+      if (!def) return;
+      const sans = def.steps.slice(0, 2).map((x) => x.m);
+      const mover = turnAt(fens[ply - 1]);
+      const pv = coach.previewLine(fens[ply - 1], sans, def.steps[0].a, mover === side ? 'blue' : 'red', mover === side ? 'red' : 'blue');
+      hoverPreview(el, () => showPreview(pv, ply - 1));
+    });
+  }
+  // Предпросмотр только при настоящем движении мыши: если карточка оказалась под курсором
+  // из-за перерисовки панели (после нажатия «▶»), доска не должна меняться сама.
+  function hoverPreview(el, show) {
+    let active = false;
+    el.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'mouse' || active) return;
+      active = true;
+      show();
+    });
+    el.addEventListener('pointerleave', (e) => {
+      if (e.pointerType !== 'mouse' || !active) return;
+      active = false;
+      hidePreview();
+    });
+  }
+  function myTurnNow() {
+    return ply < N && turnAt(fens[ply]) === side;
+  }
+
   function startDemo(c) {
     if (!c || !c.demo) return;
+    badge.hidden = true;
     startAlt({ label: c.demoLabel || `Почему не ${figurine(c.san)}?`, intro: c.text, steps: c.demo }, ply);
   }
 
@@ -722,6 +850,10 @@ function learnView(lineId) {
   }
 
   function forward() {
+    if (intro) {
+      intro = false;
+      return render();
+    }
     if (alt) {
       if (alt.ply < alt.def.steps.length) {
         alt.ply++;
@@ -744,11 +876,12 @@ function learnView(lineId) {
       return render();
     }
     if (ply > 0) ply--;
+    else if (essence) intro = true;
     render();
   }
 
   function onUserMove(m) {
-    if (alt || ply >= N) return;
+    if (intro || alt || ply >= N) return;
     const expected = moves[ply];
     if (m.from === expected.from && m.to === expected.to) {
       wrongMsg = '';
@@ -763,7 +896,11 @@ function learnView(lineId) {
       lastWrong = coach.explain(fens[ply], tried, expected, { lineId: line.id, ply });
       wrongMsg = `<div class="wn-head"><b>${moveLabel(ply, tried.san)}</b>${verdictBadge(lastWrong.verdict)}</div>
         <p>${rich(lastWrong.text)}</p>
-        ${lastWrong.demo ? '<button type="button" class="btn tiny" id="wrong-demo">▶ Показать, к чему это приведёт</button>' : ''}
+        <div class="wn-actions">
+          <button type="button" class="btn tiny" data-peek="wrong">👀 Что будет на доске</button>
+          ${lastWrong.demo ? '<button type="button" class="btn tiny" id="wrong-demo">▶ Разыграть по ходам</button>' : ''}
+        </div>
+        <div class="wn-preview" hidden></div>
         <p class="muted small">Ход по теории: <b>${figurine(expected.san)}</b> — сыграй его по зелёной стрелке.</p>`;
       render();
     }
@@ -896,6 +1033,8 @@ function drillView(lineId, queue) {
   const board = new Board(app.querySelector('#board'), { orientation: colorName(side), myColor: side, onUserMove });
   onCleanup(() => board.destroy());
   setupInsight(board);
+  activeBoard = board;
+  onCleanup(() => (activeBoard = null));
 
   let ply = 0;
   let mistakes = 0;
@@ -1375,6 +1514,12 @@ function profileView() {
         <button class="btn danger" id="reset">Сбросить всё</button>
       </div>
     </div>
+    <div class="card version-card">
+      <h2>О приложении</h2>
+      <p>${versionText()}</p>
+      <p class="muted small" id="version-status">Проверяю, есть ли обновление…</p>
+      <button type="button" class="btn" id="version-check">🔄 Проверить обновление</button>
+    </div>
     <p class="muted small center">Доска и фигуры — chessground (Lichess) · правила — chess.js</p>`;
 
   app.querySelectorAll('[data-set]').forEach((el) =>
@@ -1445,6 +1590,19 @@ function profileView() {
     };
   };
   renderSync();
+  const vStatus = app.querySelector('#version-status');
+  const showVersionStatus = async () => {
+    vStatus.textContent = 'Проверяю, есть ли обновление…';
+    const latest = await fetchLatestVersion();
+    if (!vStatus.isConnected) return;
+    if (!latest) vStatus.textContent = 'Не удалось проверить: нет связи с сайтом.';
+    else if (latest.version === APP_VERSION) vStatus.textContent = '✅ У тебя последняя версия.';
+    else vStatus.innerHTML = `На сайте уже версия ${esc(latest.version)}. <button type="button" class="btn tiny primary" id="version-update">Обновить</button>`;
+    const up = app.querySelector('#version-update');
+    if (up) up.onclick = updateApp;
+  };
+  app.querySelector('#version-check').onclick = showVersionStatus;
+  showVersionStatus();
 }
 
 async function renderSync() {
@@ -1587,6 +1745,49 @@ function glossaryHtml(q) {
   return accordion(items.map((g) => ['•', g.term, `<p>${esc(g.def)}</p>`]), !!q && items.length === 1);
 }
 
+// ─────────────────────────── версия и обновления ───────────────────────────
+
+function versionText() {
+  const d = new Date(APP_DATE + 'T12:00:00');
+  return `Версия ${APP_VERSION} от ${d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+}
+
+async function fetchLatestVersion() {
+  try {
+    const r = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch {
+    return null;
+  }
+}
+
+// Обновить приложение: сбросить офлайн-кэш и перезагрузить страницу с сервера.
+async function updateApp() {
+  try {
+    const reg = await navigator.serviceWorker?.getRegistration();
+    if (reg) await reg.update();
+  } catch {}
+  try {
+    for (const key of await caches.keys()) await caches.delete(key);
+  } catch {}
+  try {
+    sessionStorage.setItem('app-updated', '1');
+  } catch {}
+  location.reload();
+}
+
+// При запуске: если на сайте версия новее — показываем плашку «Обновить».
+async function checkForUpdate() {
+  const latest = await fetchLatestVersion();
+  if (!latest || latest.version === APP_VERSION || document.querySelector('.update-bar')) return;
+  const bar = document.createElement('div');
+  bar.className = 'update-bar';
+  bar.innerHTML = `<span>✨ Доступна новая версия ${esc(latest.version)} (у тебя ${APP_VERSION})</span><button type="button" class="btn tiny primary">Обновить</button>`;
+  bar.querySelector('button').onclick = updateApp;
+  document.body.appendChild(bar);
+}
+
 function notFound() {
   renderTopbar({ back: '#/' });
   renderTabbar('home');
@@ -1599,6 +1800,7 @@ function route() {
   cleanup.forEach((fn) => fn());
   cleanup = [];
   document.querySelectorAll('.modal-wrap').forEach((m) => m.remove());
+  activeBoard = null;
   const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
   const [view, id, extra] = parts;
   document.body.dataset.view = view || 'home';
@@ -1626,9 +1828,16 @@ function route() {
 }
 
 window.addEventListener('hashchange', route);
+// На компьютере клетка подсвечивается уже при наведении мыши.
+document.addEventListener('mouseover', (e) => {
+  const sq = e.target.closest && e.target.closest('.sq');
+  if (sq && activeBoard) activeBoard.flash([sq.dataset.sq]);
+});
 // Повторное нажатие на ссылку текущей страницы (например, вкладку «Викторина» после результата)
 // не меняет адрес, поэтому перерисовываем вручную.
 document.addEventListener('click', (e) => {
+  const sq = e.target.closest('.sq');
+  if (sq && activeBoard) activeBoard.flash([sq.dataset.sq]);
   const term = e.target.closest('.term');
   if (term) {
     e.preventDefault();
@@ -1657,6 +1866,8 @@ store.onChange(() => {
 
 route();
 store.pull();
+checkForUpdate();
+document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && checkForUpdate());
 
 // Офлайн-режим. В некоторых встроенных окнах service worker запрещён — тогда просто работаем без него.
 // Когда на сайте появилась новая версия, новый service worker берёт управление —
