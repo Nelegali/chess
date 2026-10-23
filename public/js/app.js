@@ -10,6 +10,10 @@ import { APP_VERSION, APP_DATE } from './version.js';
 
 const app = document.getElementById('app');
 const topbar = document.getElementById('topbar');
+// Высота шапки — для доски, которая на телефоне закрепляется прямо под ней.
+if ('ResizeObserver' in window) {
+  new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', `${topbar.offsetHeight}px`)).observe(topbar);
+}
 const tabbar = document.getElementById('tabbar');
 
 let cleanup = [];
@@ -488,12 +492,14 @@ function openingView(id) {
 
 function playLayout(opening, line, mode) {
   return `
-    <div class="play">
+    <div class="play lesson">
       <div class="board-col">
-        <div class="board" id="board"></div>
-        <div class="preview-badge" id="preview-badge" hidden></div>
+        <div class="board-stage">
+          <div class="board" id="board"></div>
+          <div class="preview-badge" id="preview-badge" hidden></div>
+        </div>
         <div class="board-tools">
-          <button type="button" class="btn tiny insight-btn" id="insight-btn" aria-pressed="false">👁 Куда может пойти соперник</button>
+          <button type="button" class="btn tiny insight-btn" id="insight-btn" aria-pressed="false">👁 <span class="lbl-full">Куда может пойти соперник</span><span class="lbl-short">Соперник</span></button>
         </div>
         <p class="insight-legend" id="insight-legend" hidden>
           <span><i class="ins line"></i>куда может пойти фигура соперника</span>
@@ -517,7 +523,7 @@ function playLayout(opening, line, mode) {
           <h2>${esc(opening.name)}</h2>
           <div class="sub-row">
             <p class="muted">${esc(line.name)}</p>
-            <button type="button" class="btn tiny" id="theory-btn">📚 Теория</button>
+            <button type="button" class="btn tiny" id="theory-btn" aria-label="Теория">📚 <span class="lbl-theory">Теория</span></button>
           </div>
           <div class="dots" id="dots"></div>
         </div>
@@ -2033,15 +2039,23 @@ function targetBoardFor(link) {
   return link.closest('.modal') ? null : activeBoard;
 }
 
+// Верхняя граница видимой части страницы: низ шапки, а на телефоне — низ закреплённой доски.
+function visibleTop() {
+  const stage = document.querySelector('.play .board-stage, .play.quiz .board-col');
+  if (stage && getComputedStyle(stage).position === 'sticky') return stage.getBoundingClientRect().bottom;
+  return topbar.getBoundingClientRect().bottom;
+}
+
 function flashSquareLink(link, scrollToBoard) {
   const target = targetBoardFor(link);
   if (!target) return;
   if (link.dataset.path) target.flashPath(link.dataset.path.split(','));
   else target.flash([link.dataset.sq]);
-  // Если доска ушла за край экрана — прокручиваем к ней, чтобы было видно подсветку.
+  // Если доска ушла за край экрана или спряталась под закреплённой главной доской —
+  // прокручиваем к ней, чтобы было видно подсветку.
   if (scrollToBoard && target.el) {
     const r = target.el.getBoundingClientRect();
-    if (r.bottom < 60 || r.top > innerHeight - 60) target.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (r.bottom < visibleTop() + 40 || r.top > innerHeight - 60) target.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 }
 // Повторное нажатие на ссылку текущей страницы (например, вкладку «Викторина» после результата)

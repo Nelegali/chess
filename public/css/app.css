@@ -2037,3 +2037,113 @@ body[data-view='drill'] .update-bar {
   background: #fafafa;
   box-shadow: inset 0 0 0 1px #cfcac2;
 }
+
+/* ───── урок на телефоне: доска закреплена, объяснение хода сразу под ней ───── */
+
+.board-stage {
+  position: relative;
+}
+.lbl-short {
+  display: none;
+}
+@media (max-width: 760px) {
+  /* Раскладываем содержимое колонок по одной сетке, чтобы поменять порядок:
+     доска → строка «прогресс + кнопки» → «твой ход / ход соперника» → остальное.
+     Пояснение к «Соперник», легенда цветов, название варианта и версия уходят вниз. */
+  .play.lesson {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'board board board'
+      'dots insight theory'
+      'body body body'
+      'ilegend ilegend ilegend'
+      'line line line'
+      'legend legend legend'
+      'version version version';
+    column-gap: 8px;
+    row-gap: 0;
+  }
+  .play.lesson .board-col,
+  .play.lesson .panel,
+  .play.lesson .panel-head,
+  .play.lesson .sub-row {
+    display: contents;
+  }
+  /* Доска закреплена под шапкой: при прокрутке вниз двигается только текст под ней. */
+  .play.lesson .board-stage {
+    grid-area: board;
+    position: sticky;
+    top: var(--topbar-h, calc(53px + var(--safe-top)));
+    z-index: 8;
+    margin: -8px -16px 0;
+    background: var(--bg);
+  }
+  .play.lesson .dots {
+    grid-area: dots;
+    align-self: center;
+    gap: 3px;
+    margin: 8px 0;
+  }
+  .play.lesson .dots i {
+    width: 10px;
+    height: 10px;
+  }
+  .play.lesson .board-tools {
+    grid-area: insight;
+    align-self: center;
+    margin: 0;
+  }
+  .play.lesson #theory-btn {
+    grid-area: theory;
+    align-self: center;
+  }
+  .play.lesson .lbl-full {
+    display: none;
+  }
+  .play.lesson .lbl-short {
+    display: inline;
+  }
+  .play.lesson .insight-legend {
+    grid-area: ilegend;
+    margin: 4px 0 8px;
+  }
+  .play.lesson #panel-body {
+    grid-area: body;
+    min-width: 0;
+  }
+  .play.lesson .sub-row p {
+    grid-area: line;
+    margin: 4px 0 0;
+    text-align: center;
+    font-size: 0.8rem;
+  }
+  .play.lesson .legend {
+    grid-area: legend;
+  }
+  .play.lesson .version-note {
+    grid-area: version;
+  }
+  /* Прокрутка к элементу (scrollIntoView, переход по Tab) не должна прятать его под закреплённой доской. */
+  html:has(.play.lesson),
+  html:has(.play.quiz) {
+    scroll-padding-top: calc(var(--topbar-h, 53px) + min(100vw, calc(100vh - 290px)));
+    scroll-padding-top: calc(var(--topbar-h, 53px) + min(100vw, calc(100svh - 290px)));
+  }
+  /* в викторине доска тоже стоит на месте, пока листаешь варианты ответа */
+  .play.quiz .board-col {
+    position: sticky;
+    top: var(--topbar-h, calc(53px + var(--safe-top)));
+    z-index: 8;
+    background: var(--bg);
+  }
+}
+@media (max-width: 359px) {
+  .play.lesson .lbl-theory {
+    display: none;
+  }
+  /* узкий экран: стрелки «назад/вперёд» поуже, чтобы надпись на главной кнопке влезала в одну строку */
+  .actionbar .btn.nav {
+    flex-basis: 44px;
+  }
+}
