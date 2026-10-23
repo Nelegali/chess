@@ -1,6 +1,6 @@
 import { OPENINGS, CATEGORIES, SIGNATURE, findLine, lineSide, allLines } from './openings.js';
 import * as store from './store.js';
-import { Board, Chess, parseArrows, threatArrows, sanToMove, moveLabel, figurine, PIECE_NAME, FLASH_MS, PATH_MS, circleShapes, pathArrows, destroyBoard, guardRedraw, hasSize } from './board.js';
+import { Board, Chess, parseArrows, threatArrows, sanToMove, moveLabel, figurine, PIECE_NAME, FLASH_MS, PATH_MS, circleShapes, pathArrows, destroyBoard, guardRedraw, hasSize, glyphShape } from './board.js';
 import { Chessground } from '../vendor/chessground.js';
 import { play as sound } from './sound.js';
 import * as lichess from './lichess.js';
@@ -54,7 +54,69 @@ function annBadge(san) {
   const a = annOf(san);
   return a ? `<span class="ann ${a.includes('?') ? 'bad' : 'good'}">${ANN[a]}</span>` : '';
 }
-const verdictBadge = (v) => `<span class="wn-badge v-${v}">${coach.VERDICTS[v]}</span>`;
+// Оценка хода: значок, заголовок плашки и подпись бейджа. book — ход по теории.
+const VERDICT_UI = {
+  blunder: { icon: '💥', title: 'Грубая ошибка!' },
+  mistake: { icon: '⚠️', title: 'Ошибка' },
+  dubious: { icon: '🤔', title: 'Сомнительный ход' },
+  ok: { icon: '👌', title: 'Нормальный ход' },
+  good: { icon: '👍', title: 'Хороший ход' },
+  book: { icon: '📖', title: 'Ход по теории — так и надо!' },
+};
+const verdictBadge = (v) => `<span class="wn-badge v-${v}">${VERDICT_UI[v].icon} ${v === 'book' ? 'по теории' : coach.VERDICTS[v]}</span>`;
+const verdictBanner = (v, note = '') =>
+  `<div class="verdict-banner v-${v}"><span class="vb-icon">${VERDICT_UI[v].icon}</span><span><b>${VERDICT_UI[v].title}</b>${note ? `<span class="vb-note">${note}</span>` : ''}</span></div>`;
+
+// Очки — стоимость фигур на доске: пешка 1, конь и слон по 3, ладья 5, ферзь 9 (король не считается).
+const PIECE_POINTS = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+const START_COUNT = { q: 1, r: 2, b: 2, n: 2, p: 8 };
+const TAKEN_FIG = { w: { q: '♕', r: '♖', b: '♗', n: '♘', p: '♙' }, b: { q: '♛', r: '♜', b: '♝', n: '♞', p: '♟' } };
+function material(fen) {
+  const count = { w: { p: 0, n: 0, b: 0, r: 0, q: 0, k: 0 }, b: { p: 0, n: 0, b: 0, r: 0, q: 0, k: 0 } };
+  for (const ch of fen.split(' ')[0]) {
+    const t = ch.toLowerCase();
+    if (t in PIECE_POINTS) count[ch === t ? 'b' : 'w'][t]++;
+  }
+  const points = (c) => Object.entries(count[c]).reduce((a, [t, n]) => a + PIECE_POINTS[t] * n, 0);
+  // какие фигуры соперника взяты: чего не хватает до начального набора
+  const taken = (c) =>
+    Object.entries(START_COUNT)
+      .map(([t, n]) => TAKEN_FIG[c][t].repeat(Math.max(0, n - count[c][t])))
+      .join('');
+  return { w: points('w'), b: points('b'), takenFrom: { w: taken('w'), b: taken('b') } };
+}
+
+// Строка «очки»: у кого больше и на сколько. side — за кого играет ученик.
+function materialHtml(fen, side, { onlyIfUnequal = false } = {}) {
+  const m = material(fen);
+  if (onlyIfUnequal && m.w === m.b) return '';
+  const opp = side === 'w' ? 'b' : 'w';
+  const diff = m[side] - m[opp];
+  const label = diff > 0 ? `+${diff} у тебя` : diff < 0 ? `+${-diff} у соперника` : 'поровну';
+  return `<button type="button" class="material" data-material aria-label="Очки: стоимость фигур">
+      <span class="mat-side">⚖️ Очки: <b>ты ${m[side]}</b> <span class="mat-took">${m.takenFrom[opp]}</span> · соперник ${m[opp]} <span class="mat-took">${m.takenFrom[side]}</span></span>
+      <span class="mat-diff ${diff > 0 ? 'me' : diff < 0 ? 'opp' : ''}">${label}</span>
+    </button>`;
+}
+
+// Короткая форма очков для строки под доской: «⚖️ 39 : 36 · +3».
+function materialChip(fen, side) {
+  const m = material(fen);
+  const opp = side === 'w' ? 'b' : 'w';
+  const diff = m[side] - m[opp];
+  return `<button type="button" class="mat-chip ${diff > 0 ? 'me' : diff < 0 ? 'opp' : ''}" data-material aria-label="Очки: ты ${m[side]}, соперник ${m[opp]}">⚖️ ${m[side]} : ${m[opp]}${diff ? ` <b>${diff > 0 ? '+' : '−'}${Math.abs(diff)}</b>` : ''}</button>`;
+}
+
+// Насколько популярен ход san в позиции со статистикой data (Lichess или встроенной).
+function popularityHtml(data, san) {
+  if (!data || !data.total) return '';
+  const k = data.moves.findIndex((m) => m.san === san);
+  if (k < 0) return `<div class="pop-line rare">📊 Редкий ход: среди частых его нет — почти все играют иначе.</div>`;
+  const m = data.moves[k];
+  const pct = Math.max(1, Math.round(((m.white + m.draws + m.black) / data.total) * 100));
+  const place = k === 0 ? 'самый популярный ход' : `${k + 1}-й по популярности`;
+  return `<div class="pop-line"><span class="pop-bar"><i style="width:${pct}%"></i></span>📊 Так играют в <b>${pct}%</b> партий — ${place}</div>`;
+}
 
 // Раскрыт ли блок «Почему не по-другому?» — запоминаем выбор.
 let whyOpen = true;
@@ -223,7 +285,7 @@ function modal(html, { onClose } = {}) {
   return { el: wrap, close };
 }
 
-function toast(html, cls = '') {
+function toast(html, cls = '', ms = 3200) {
   const t = document.createElement('div');
   t.className = `toast ${cls}`;
   t.innerHTML = html;
@@ -232,7 +294,7 @@ function toast(html, cls = '') {
   setTimeout(() => {
     t.classList.remove('show');
     setTimeout(() => t.remove(), 400);
-  }, 3200);
+  }, ms);
 }
 
 function announceAchievements(list) {
@@ -595,6 +657,7 @@ function learnView(lineId) {
   let alt = null; // { def, fens, moves, ply, base }
   let explorerOpen = false;
   let wrongMsg = '';
+  let wrongVerdict = 'ok';
   let lastWrong = null;
 
   // «Идея дебюта»: перед первым ходом показываем на доске, к какой позиции придём и зачем.
@@ -633,6 +696,25 @@ function learnView(lineId) {
     return alt ? alt.fens[alt.ply] : fens[ply];
   }
 
+  // «Так играют в 48% партий»: насколько популярен показанный ход (Lichess или встроенная статистика).
+  const popCache = new Map();
+  function fillPopularity() {
+    const slot = body.querySelector('.pop-slot');
+    if (!slot || ply === 0) return;
+    const k = ply - 1;
+    const f = fens[k];
+    const show = (data) => {
+      if (slot.isConnected) slot.innerHTML = popularityHtml(data, moves[k].san);
+    };
+    if (popCache.has(f)) return show(popCache.get(f));
+    moveStats(moves.slice(0, k).map((m) => m.from + m.to + (m.promotion || '')), f)
+      .then((data) => {
+        popCache.set(f, data);
+        show(data);
+      })
+      .catch(() => popCache.set(f, null));
+  }
+
   function uciHistory() {
     const main = moves.slice(0, alt ? alt.base : ply);
     const extra = alt ? alt.moves.slice(0, alt.ply) : [];
@@ -658,7 +740,9 @@ function learnView(lineId) {
     board.load(fens[ply], last ? [last.from, last.to] : undefined);
     const next = ply < N ? moves[ply] : null;
     const myTurn = next && turnAt(fens[ply]) === side;
-    board.shapes(shapesFor(step, fens[ply], myTurn ? next : null));
+    // свой правильный ход отмечаем значком «★ по теории», как в свободной игре
+    const lastMine = ply > 0 && turnAt(fens[ply - 1]) === side;
+    board.shapes([...shapesFor(step, fens[ply], myTurn ? next : null), ...(lastMine ? [glyphShape(last.to, 'book')] : [])]);
     board.setHint(myTurn && store.settings.hints ? next.from : null);
     if (myTurn) board.enable(side);
     renderDots(dots, N, ply, side, fens);
@@ -682,7 +766,7 @@ function learnView(lineId) {
           <div>Твой ход: <b>${figurine(clean(nextStep.m))}</b>. ${howToMove(next)}</div>
           <div class="why"><span class="why-label">Зачем этот ход</span>${rich(nextStep.t)}</div>
         </div>
-        ${wrongMsg ? `<div class="wrong-msg" data-wrong="1">${wrongMsg}</div>` : ''}
+        ${wrongMsg ? `<div class="wrong-msg vc-${wrongVerdict}" data-wrong="1">${wrongMsg}</div>` : ''}
         ${whyNotBlock()}`;
       mainBtn = `<button class="btn" id="auto">▶ Сделать ход ${figurine(clean(nextStep.m))}</button>`;
     } else {
@@ -707,7 +791,8 @@ function learnView(lineId) {
       : '';
 
     body.innerHTML = `
-      <div class="move-card">${head}${text}</div>
+      ${materialHtml(fens[ply], side, { onlyIfUnequal: true })}
+      <div class="move-card">${head}${step ? '<div class="pop-slot"></div>' : ''}${text}</div>
       ${alts}
       ${prompt}
       ${explorerBlock()}
@@ -718,6 +803,7 @@ function learnView(lineId) {
       </div>
     `;
     bindCommon();
+    fillPopularity();
     body.querySelectorAll('[data-alt]').forEach((b) =>
       b.addEventListener('click', () => startAlt(step.alt[+b.dataset.alt])),
     );
@@ -1042,11 +1128,17 @@ function learnView(lineId) {
       render();
     } else {
       sound('wrong');
-      board.shake();
       const tried = sanToMove(fens[ply], m);
-      if (!tried) return render();
+      if (!tried) return board.shake(), render();
       lastWrong = coach.explain(fens[ply], tried, expected, { lineId: line.id, ply });
-      wrongMsg = `<div class="wn-head"><b>${moveLabel(ply, tried.san)}</b>${verdictBadge(lastWrong.verdict)}</div>
+      const v = lastWrong.verdict;
+      const replySan = lastWrong.demo && lastWrong.demo[1] ? lastWrong.demo[1].m : null;
+      const after = new Chess(fens[ply]);
+      after.move(tried.san);
+      const reply = replySan ? sanToMove(after.fen(), replySan) : null;
+      const punish = reply && (v === 'blunder' || v === 'mistake') ? `Красная стрелка — как соперник накажет: ${figurine(reply.san)}` : '';
+      wrongMsg = `<div class="wn-head"><b>${moveLabel(ply, tried.san)}</b></div>
+        ${verdictBanner(v, punish)}
         <p>${rich(lastWrong.text)}</p>
         <div class="wn-actions">
           <button type="button" class="btn tiny" data-peek="wrong">👀 Что будет на доске</button>
@@ -1054,7 +1146,17 @@ function learnView(lineId) {
         </div>
         <div class="wn-preview" hidden></div>
         <p class="muted small">Ход по теории: <b>${figurine(expected.san)}</b> — сыграй его по зелёной стрелке.</p>`;
+      wrongVerdict = v;
       render();
+      // на доске: какой ход сделан (стрелка и значок) и чем он плох (стрелка ответа соперника)
+      const bad = v === 'blunder' || v === 'mistake';
+      const shapes = [{ orig: tried.from, dest: tried.to, brush: bad ? 'red' : 'yellow', modifiers: { lineWidth: 10 } }];
+      const glyph = glyphShape(tried.to, v);
+      if (glyph) shapes.push(glyph);
+      if (reply && bad) shapes.push({ orig: reply.from, dest: reply.to, brush: 'red', modifiers: { lineWidth: 13 } });
+      board.flashShapes(shapes, 4500);
+      if (bad) board.pulse('bad');
+      else board.shake();
     }
   }
 
@@ -1685,7 +1787,6 @@ function freeView() {
     }
   }
   let cursor = Math.min(Math.max(0, saved.cursor ?? moves.length), moves.length);
-  let showMine = false; // подсказка «что здесь играют» на своём ходу
   const explorerData = new Map(); // позиция → { data } | { error } | 'loading'
   let alive = true; // статистика может прийти, когда экран уже закрыт
   onCleanup(() => (alive = false));
@@ -1736,6 +1837,16 @@ function freeView() {
 
   // Строка «что разыгрывается». Пока подходит много дебютов (например, после 1.e4) — перечисляем их,
   // когда дебют определился — пишем вариант и сколько ходов из него уже сыграно.
+  // Название для шапки: какой дебют на доске (или «Свободная игра», пока непонятно).
+  function openingTitle() {
+    const d = detect();
+    if (!d.entries.length) return 'Свободная игра';
+    const { openings, traps } = namesOf(d.entries);
+    if (d.inBook && openings.length >= 3) return 'Свободная игра';
+    const name = (openings[0] || traps[0]).opening.name;
+    return d.inBook ? name : `${name} (вне теории)`;
+  }
+
   function openingStatus() {
     if (cursor === 0) return '';
     const d = detect();
@@ -1763,40 +1874,83 @@ function freeView() {
     return `<div class="free-opening off">🧭 Такого начала нет в нашей базе<div class="fo-sub">${lichessName.replace(/^ · /, '')}</div></div>`;
   }
 
-  // Разбор последнего хода: текст из теории, а если ход не по теории — оценка тренера.
+  // Разбор хода i: по теории он или нет, оценка тренера и как соперник накажет ошибку.
+  const analysisCache = new Map();
+  function analyse(i) {
+    const key = fens[i] + ' ' + moves[i].san;
+    if (analysisCache.has(key)) return analysisCache.get(key);
+    const m = moves[i];
+    let a;
+    const book = bookFor(i);
+    if (book.length) {
+      a = { verdict: 'book', text: book[0].text, arrows: book[0].arrows };
+    } else {
+      const known = bookMain(fens[i]);
+      const theory = known.length ? sanToMove(fens[i], known[0].san) : null;
+      const e = coach.explain(fens[i], m, theory, known.length ? { lineId: known[0].line.id, ply: known[0].ply } : {});
+      // ответ соперника, который наказывает ход (если тренер его знает)
+      const replySan = e.demo && e.demo[1] ? e.demo[1].m : null;
+      const reply = replySan ? sanToMove(fens[i + 1], replySan) : null;
+      a = { verdict: e.verdict, text: e.text + (theory ? ` По теории здесь играют ${figurine(known[0].san)}.` : ''), reply };
+    }
+    analysisCache.set(key, a);
+    return a;
+  }
+
+  // Разбор последнего хода: плашка с оценкой, насколько ход популярен, объяснение.
   function lastMoveCard() {
     if (cursor === 0) {
       return `<div class="move-card">
           <div class="move-head"><span class="san">Начальная позиция</span><span class="who me">ты играешь ${sideName(side)}</span></div>
-          <p class="explain">Ходи на доске как хочешь. Я буду писать, какой дебют получается, а на ходу соперника покажу его самые популярные ответы — выбери, как он сыграет.</p>
+          <p class="explain">Ходи на доске как хочешь. Я буду писать, какой дебют получается, оценивать каждый ход и показывать, насколько он популярен, а на ходу соперника — его самые частые ответы: выбери, как он сыграет.</p>
         </div>`;
     }
     const i = cursor - 1;
     const m = moves[i];
     const mover = turnAt(fens[i]);
-    let badge = '';
-    let text = '';
-    const book = bookFor(i);
-    if (book.length) {
-      badge = '<span class="wn-badge v-book">по теории</span>';
-      text = book[0].text;
-    } else {
-      const known = bookMain(fens[i]);
-      const theory = known.length ? sanToMove(fens[i], known[0].san) : null;
-      const e = coach.explain(fens[i], m, theory, known.length ? { lineId: known[0].line.id, ply: known[0].ply } : {});
-      badge = verdictBadge(e.verdict);
-      text = e.text + (theory ? ` По теории здесь играют ${figurine(known[0].san)}.` : '');
-    }
+    const a = analyse(i);
+    const ex = explorerData.get(fens[i]);
+    const pop = ex && ex.data ? popularityHtml(ex.data, m.san) : '';
+    const punish =
+      a.reply && (a.verdict === 'blunder' || a.verdict === 'mistake')
+        ? `Красная стрелка на доске — как ${mover === side ? 'соперник накажет' : 'ты можешь наказать'}: ${figurine(a.reply.san)}`
+        : '';
     const c = new Chess(fen());
     const over = c.isCheckmate()
       ? `<div class="prompt done">🏁 Мат! Победили ${mover === 'w' ? 'белые' : 'чёрные'}.</div>`
       : c.isDraw() || c.isStalemate()
         ? '<div class="prompt done">🤝 Ничья.</div>'
         : '';
-    return `<div class="move-card">
-        <div class="move-head"><span class="san">${moveLabel(i, m.san)}</span><span class="who ${mover === side ? 'me' : 'opp'}">${mover === side ? 'твой ход' : 'ход соперника'}</span>${badge}</div>
-        <p class="explain">${rich(text)}</p>
+    const choosing = !over && turnAt(fen()) !== side;
+    const bad = a.verdict === 'blunder' || a.verdict === 'mistake';
+    const text = choosing && !bad
+      ? `<details class="why-more"><summary>Почему?</summary><p class="explain">${rich(a.text)}</p></details>`
+      : `<p class="explain">${rich(a.text)}</p>`;
+    return `<div class="move-card vc-${a.verdict}">
+        <div class="move-head"><span class="san">${moveLabel(i, m.san)}</span><span class="who ${mover === side ? 'me' : 'opp'}">${mover === side ? 'твой ход' : 'ход соперника'}</span></div>
+        ${verdictBanner(a.verdict, punish)}
+        ${pop}
+        ${text}
       </div>${over}`;
+  }
+
+  // Значок оценки и подсветка клетки последнего хода, стрелка наказания за ошибку.
+  function verdictShapes() {
+    if (cursor === 0) return { shapes: [], marks: [] };
+    const i = cursor - 1;
+    const m = moves[i];
+    const a = analyse(i);
+    const shapes = [];
+    const marks = [];
+    const glyph = glyphShape(m.to, a.verdict);
+    if (glyph) shapes.push(glyph);
+    const cls = { blunder: 'mark-bad', mistake: 'mark-bad', dubious: 'mark-warn', good: 'mark-good', book: 'mark-good' }[a.verdict];
+    if (cls) marks.push([m.to, cls]);
+    if (a.reply && (a.verdict === 'blunder' || a.verdict === 'mistake')) {
+      shapes.push({ orig: a.reply.from, dest: a.reply.to, brush: 'red', modifiers: { lineWidth: 13 } });
+      if (a.reply.captured) marks.push([a.reply.to, 'mark-lost']);
+    }
+    return { shapes, marks };
   }
 
   // Варианты хода для стороны, которая ходит: статистика Lichess + ходы из базы.
@@ -1805,9 +1959,17 @@ function freeView() {
     const book = new Map();
     for (const e of coach.bookMoves(f)) {
       const label = e.altDef ? e.altDef.label : e.opening.name;
-      const b = book.get(e.san) || { labels: [], main: false };
+      const b = book.get(e.san) || { labels: [], main: false, text: '' };
       if (!b.labels.includes(label)) b.labels.push(label);
       if (e.ply !== undefined) b.main = true;
+      // зачем этот ход — первая фраза объяснения из урока (основной вариант важнее побочного)
+      if (e.text && (!b.text || (e.ply !== undefined && !b.fromMain))) {
+        const sentences = e.text.match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g) || [e.text];
+        let why = '';
+        for (const t of sentences.slice(0, 2)) if (why.length < 50) why += t;
+        b.text = why.trim();
+        b.fromMain = e.ply !== undefined;
+      }
       book.set(e.san, b);
     }
     const ex = explorerData.get(f);
@@ -1885,13 +2047,12 @@ function freeView() {
             const bar = n
               ? `<span class="wdb"><i class="w" style="width:${(r.w / n) * 100}%"></i><i class="d" style="width:${(r.d / n) * 100}%"></i><i class="b" style="width:${(r.b / n) * 100}%"></i></span>`
               : '';
-            const note = r.book
-              ? `<span class="c-note">★ ${r.book.labels.slice(0, 2).map(esc).join(' · ')}</span>`
-              : r.coachPick
-                ? '<span class="c-note coach">разумный ход по оценке тренера</span>'
-                : '';
+            const note = r.book ? `<span class="c-note">★ ${r.book.labels.slice(0, 2).map(esc).join(' · ')}</span>` : '';
+            // зачем этот ход: из урока, а если его нет в базе — короткая идея от тренера
+            const idea = (r.book && r.book.text) || coach.moveIdea(fen(), r.move);
+            const ideaHtml = idea ? `<span class="c-idea">${rich(idea)}</span>` : '';
             return `<button type="button" class="cand ${r.book ? 'book' : ''}" data-k="${k}">
-                <span class="c-san">${figurine(r.san)}</span><span class="c-pct">${pct}</span><span class="c-bar">${bar}</span>${note}
+                <span class="c-san">${figurine(r.san)}</span><span class="c-pct">${pct}</span><span class="c-bar">${bar}</span>${note}${ideaHtml}
               </button>`;
           })
           .join('')
@@ -1899,6 +2060,7 @@ function freeView() {
     return `<div class="cands">
         <div class="cands-title">${title}</div>
         ${list}
+        ${rows.some((r) => r.coachPick) ? '<p class="muted small">Статистики для этой позиции нет — это ходы, которые тренер считает разумными.</p>' : ''}
         ${rows.some((r) => r.n) ? `<p class="muted small">% — как часто так играют: ${ex.data.source === 'local' ? `встроенная статистика по ${ex.data.total.toLocaleString('ru-RU')} ${plural(ex.data.total, 'партии', 'партиям', 'партиям')} с Lichess` : 'Lichess, игроки 1400–2000'}. Полоска: победы белых / ничьи / победы чёрных. ★ — ход из нашей базы.</p>` : ''}
         ${ex && ex.data && ex.data.lichessError ? '<p class="muted small">Свежая статистика Lichess: <button type="button" class="link-btn" id="ex-help-btn">подключить</button></p><div id="ex-help"></div>' : ''}
         ${loading}${noStats}
@@ -1906,15 +2068,16 @@ function freeView() {
       </div>`;
   }
 
-  function loadExplorer() {
-    const f = fen();
+  // Статистика позиции после k ходов: для выбора ответа и чтобы показать, насколько популярен ход.
+  function loadExplorer(k = cursor) {
+    const f = fens[k];
     if (explorerData.has(f)) return;
     explorerData.set(f, 'loading');
-    moveStats(moves.slice(0, cursor).map(uci), f)
+    moveStats(moves.slice(0, k).map(uci), f)
       .then((data) => explorerData.set(f, { data }))
       .catch((error) => explorerData.set(f, { error }))
       .finally(() => {
-        if (alive && fen() === f) render();
+        if (alive && (fen() === f || fens[cursor - 1] === f)) render();
       });
   }
 
@@ -1929,6 +2092,25 @@ function freeView() {
   }
 
   let rows = [];
+  // Страницы под доской: 0 — разбор хода, 1 — ответ соперника / что играть, 2 — партия.
+  // На телефоне они листаются свайпом, на компьютере идут одна под другой.
+  let page = 0;
+  const PAGE_NAMES = ['📋 Разбор', '', '📜 Партия'];
+
+  // Стрелки на доске: на ходу соперника — его популярные ответы; на своём ходу — подсказка,
+  // только если открыта страница «Что играть»; иначе — идеи хода из теории.
+  function applyShapes() {
+    const over = new Chess(fen()).isGameOver();
+    const myTurn = turnAt(fen()) === side;
+    const showCands = !over && (!myTurn || page === 1);
+    const lastBook = cursor > 0 ? bookFor(cursor - 1) : [];
+    const vs = verdictShapes();
+    const main = showCands ? candidateArrows(rows, myTurn) : lastBook.length ? parseArrows(lastBook[0].arrows) : [];
+    // стрелка наказания важнее: убираем совпадающую с ней стрелку-кандидата
+    const taken = new Set(vs.shapes.filter((x) => x.dest).map((x) => x.orig + x.dest));
+    board.shapes([...main.filter((x) => !taken.has(x.orig + x.dest)), ...vs.shapes]);
+    return vs;
+  }
 
   function render() {
     const f = fen();
@@ -1940,33 +2122,92 @@ function freeView() {
     board.load(f, last ? [last.from, last.to] : undefined);
     if (!over) board.enable(turn);
 
-    const showCands = !over && (!myTurn || showMine);
-    if (showCands) loadExplorer();
-    rows = showCands ? candidates() : [];
-    const lastBook = cursor > 0 ? bookFor(cursor - 1) : [];
-    board.shapes(showCands ? candidateArrows(rows, myTurn) : lastBook.length ? parseArrows(lastBook[0].arrows) : []);
-    app.querySelector('#dots').innerHTML = `<span class="turn-chip ${myTurn ? 'me' : 'opp'}">${over ? 'Партия окончена' : myTurn ? `Твой ход (${turn === 'w' ? 'белые' : 'чёрные'})` : 'Ход соперника'}</span>`;
+    if (!over) loadExplorer();
+    if (cursor > 0) loadExplorer(cursor - 1);
+    rows = over ? [] : candidates();
+    board.setMarks(applyShapes().marks);
+    app.querySelector('#dots').innerHTML = materialChip(f, side);
+    topbar.querySelector('.title').textContent = openingTitle();
 
     let mainBtn;
     if (over) mainBtn = '<button class="btn primary" id="free-new">⟲ Новая партия</button>';
     else if (!myTurn) mainBtn = `<button class="btn primary" id="free-random" ${rows.length ? '' : 'disabled'}>🎲 Ответ соперника</button>`;
-    else mainBtn = `<button class="btn" id="free-hint">💡 ${showMine ? 'Скрыть подсказку' : 'Что здесь играют?'}</button>`;
+    else mainBtn = `<button class="btn" id="free-hint">💡 ${page === 1 ? 'Скрыть подсказку' : 'Что здесь играют?'}</button>`;
 
-    // На ходу соперника главное — выбрать его ответ, поэтому список идёт первым.
+    PAGE_NAMES[1] = over ? '🏁 Итог' : myTurn ? '💡 Что играть' : '🎯 Ответ соперника';
     body.innerHTML = `
-      ${openingStatus()}
-      ${showCands && !myTurn ? candidatesHtml(rows, false) : ''}
-      ${lastMoveCard()}
-      ${showCands && myTurn ? candidatesHtml(rows, true) : ''}
-      ${!over && myTurn && !showMine ? `<div class="prompt mine">Твой ход ${sideName(turn)}: ходи на доске. Не знаешь, что играть, — нажми «💡 Что здесь играют?».</div>` : ''}
-      ${movesListHtml()}
+      <div class="pager-tabs" role="tablist">
+        ${PAGE_NAMES.map((name, k) => `<button type="button" role="tab" class="pager-tab ${k === page ? 'on' : ''}" data-go="${k}" aria-selected="${k === page}">${name}</button>`).join('')}
+      </div>
+      <div class="pager" id="pager">
+        <section class="page" data-page="0">
+          ${lastMoveCard()}
+          ${openingStatus()}
+          ${!over && myTurn ? `<div class="prompt mine">Твой ход ${sideName(turn)}: ходи на доске. <span class="phone-only">Не знаешь, что играть, — листай вправо 👉</span><span class="desk-only">Не знаешь, что играть, — нажми «💡 Что здесь играют?».</span></div>` : ''}
+          ${!over && !myTurn ? '<p class="muted small phone-only">👉 Листай вправо — ответы соперника</p>' : ''}
+        </section>
+        <section class="page ${myTurn && page !== 1 ? 'desk-hidden' : ''}" data-page="1">
+          ${!over && !myTurn ? lastMoveSummary() : ''}
+          ${over ? '<p class="muted">Партия окончена. Можно отмотать ходы назад ◀ и попробовать иначе.</p>' : candidatesHtml(rows, myTurn)}
+        </section>
+        <section class="page" data-page="2">
+          ${movesListHtml() || '<p class="muted">Ходов пока нет.</p>'}
+        </section>
+      </div>
       <div class="actionbar">
         <button class="btn nav" id="prev" ${cursor === 0 ? 'disabled' : ''} aria-label="Назад">◀</button>
         ${mainBtn}
         <button class="btn nav" id="next" ${cursor >= moves.length ? 'disabled' : ''} aria-label="Вперёд">▶</button>
       </div>`;
     bind();
+    showPage(page, false);
     save();
+  }
+
+  // Строка «твой ход — оценка — популярность» над ответами соперника; нажатие открывает разбор.
+  function lastMoveSummary() {
+    if (cursor === 0) return '';
+    const i = cursor - 1;
+    const a = analyse(i);
+    const ex = explorerData.get(fens[i]);
+    const data = ex && ex.data;
+    const st = data && data.total ? data.moves.find((m) => m.san === moves[i].san) : null;
+    const pct = st ? ` · так играют в ${Math.max(1, Math.round(((st.white + st.draws + st.black) / data.total) * 100))}%` : data && data.total ? ' · редкий ход' : '';
+    return `<button type="button" class="last-sum vc-${a.verdict}" data-go="0">
+        <span>${moveLabel(i, moves[i].san)}</span>${verdictBadge(a.verdict)}<span class="muted small">${pct}</span><span class="ls-more">разбор ›</span>
+      </button>`;
+  }
+
+  // Перейти на страницу k (на телефоне — прокрутить ленту страниц).
+  function showPage(k, smooth = true) {
+    page = k;
+    const pager = body.querySelector('#pager');
+    if (!pager) return;
+    body.querySelectorAll('.pager-tab').forEach((t) => {
+      const on = +t.dataset.go === k;
+      t.classList.toggle('on', on);
+      t.setAttribute('aria-selected', on);
+    });
+    const swipe = pager.scrollWidth > pager.clientWidth + 1;
+    if (swipe) {
+      const target = k * pager.clientWidth;
+      if (Math.abs(pager.scrollLeft - target) > 2) {
+        if (smooth) pager.scrollTo({ left: target, behavior: 'smooth' });
+        else pager.scrollLeft = target;
+      }
+      fitPagerHeight();
+    } else pager.style.height = '';
+  }
+  // поворот телефона или изменение окна: раскладка страниц могла смениться
+  const onResize = () => showPage(page, false);
+  window.addEventListener('resize', onResize);
+  onCleanup(() => window.removeEventListener('resize', onResize));
+
+  // Высота ленты — по открытой странице, чтобы под короткой страницей не было пустоты.
+  function fitPagerHeight() {
+    const pager = body.querySelector('#pager');
+    const el = pager && pager.querySelector(`[data-page="${page}"]`);
+    if (el) pager.style.height = `${el.offsetHeight}px`;
   }
 
   function bind() {
@@ -1977,10 +2218,38 @@ function freeView() {
     if (q('#free-random')) q('#free-random').onclick = playRandom;
     if (q('#free-hint'))
       q('#free-hint').onclick = () => {
-        showMine = !showMine;
+        page = page === 1 ? 0 : 1;
         render();
       };
     if (q('#free-restart')) q('#free-restart').onclick = restart;
+    body.querySelectorAll('.pager-tab, .last-sum').forEach((t) => {
+      t.onclick = () => {
+        const k = +t.dataset.go;
+        if (k === page) return;
+        const was = page;
+        showPage(k);
+        if (was === 1 || k === 1) applyShapes();
+      };
+    });
+    // свайп: страница меняется, когда лента остановилась
+    const pager = q('#pager');
+    let settle = null;
+    pager.addEventListener(
+      'scroll',
+      () => {
+        clearTimeout(settle);
+        settle = setTimeout(() => {
+          if (pager.scrollWidth <= pager.clientWidth + 1) return;
+          const k = Math.round(pager.scrollLeft / pager.clientWidth);
+          if (k === page) return fitPagerHeight();
+          const was = page;
+          showPage(k, false);
+          if (was === 1 || k === 1) applyShapes();
+          if (window.scrollY > 0) window.scrollTo({ top: 0, behavior: 'smooth' });
+        }, 90);
+      },
+      { passive: true },
+    );
     body.querySelectorAll('.cand').forEach((b) => {
       const r = rows[+b.dataset.k];
       b.onclick = () => playMove(r.move);
@@ -1991,10 +2260,11 @@ function freeView() {
     body.querySelectorAll('.ml-move').forEach((b) => {
       b.onclick = () => {
         cursor = +b.dataset.ply;
-        showMine = false;
+        page = 0;
         render();
       };
     });
+    body.querySelectorAll('details').forEach((d) => d.addEventListener('toggle', fitPagerHeight));
     const help = q('#ex-help-btn');
     if (help)
       help.onclick = () => {
@@ -2004,6 +2274,7 @@ function freeView() {
           explorerData.clear();
           render();
         });
+        fitPagerHeight();
       };
   }
 
@@ -2025,9 +2296,17 @@ function freeView() {
       fens.push(c.fen());
       cursor++;
     }
-    showMine = false;
-    sound(mv.captured ? 'capture' : 'move');
+    const a = analyse(cursor - 1);
+    page = mv.color === side && a.verdict !== 'blunder' && a.verdict !== 'mistake' ? 1 : 0;
     render();
+    // свой ход: вспышка и звук по оценке; ход соперника — обычный звук
+    if (mv.color === side && (a.verdict === 'blunder' || a.verdict === 'mistake')) {
+      board.pulse('bad');
+      sound('wrong');
+    } else if (mv.color === side && (a.verdict === 'book' || a.verdict === 'good')) {
+      board.pulse('good');
+      sound('correct');
+    } else sound(mv.captured ? 'capture' : 'move');
   }
 
   function onUserMove(m) {
@@ -2049,21 +2328,21 @@ function freeView() {
   function back() {
     if (cursor === 0) return;
     cursor--;
-    showMine = false;
+    page = 0;
     render();
   }
 
   function forward() {
     if (cursor >= moves.length) return;
     cursor++;
-    showMine = false;
+    page = 0;
     render();
   }
 
   // «Заново» не стирает партию сразу: её можно вернуть кнопкой ▶, пока не сыгран другой ход.
   function restart() {
     cursor = 0;
-    showMine = false;
+    page = 0;
     render();
   }
 
@@ -2073,7 +2352,7 @@ function freeView() {
     board.cg.set({ orientation: colorName(side) });
     app.querySelector('#side-label').textContent = `Ты играешь ${sideName(side)}`;
     app.querySelector('#side-btn .lbl-theory').textContent = side === 'w' ? 'За чёрных' : 'За белых';
-    showMine = false;
+    page = 0;
     render();
   };
 
@@ -2548,6 +2827,10 @@ function flashSquareLink(link, scrollToBoard) {
 // Повторное нажатие на ссылку текущей страницы (например, вкладку «Викторина» после результата)
 // не меняет адрес, поэтому перерисовываем вручную.
 document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-material]')) {
+    toast('⚖️ <b>Очки</b> — стоимость фигур на доске: пешка 1, конь и слон по 3, ладья 5, ферзь 9 (король не считается). У кого больше очков, у того перевес в материале. Рядом — фигуры, которые уже взяты.', '', 7000);
+    return;
+  }
   const sq = e.target.closest('.sq');
   if (sq && !sq.closest('button')) flashSquareLink(sq, true);
   const term = e.target.closest('.term');

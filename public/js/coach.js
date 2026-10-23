@@ -77,6 +77,105 @@ export function bookMoves(fen) {
   return INDEX.get(posKey(fen)) || [];
 }
 
+// ─── короткая идея хода: зачем он и что даёт дальше ───
+
+const NOM = { p: 'пешка', n: 'конь', b: 'слон', r: 'ладья', q: 'ферзь', k: 'король' };
+const DAT = { p: 'пешке', n: 'коню', b: 'слону', r: 'ладье', q: 'ферзю', k: 'королю' };
+const CENTER = ['d4', 'e4', 'd5', 'e5'];
+const ALL_SQUARES = [];
+for (const f of 'abcdefgh') for (let r = 1; r <= 8; r++) ALL_SQUARES.push(f + r);
+
+// Сколько клеток бьёт фигура на square (для «открывает дорогу слону»).
+function reach(chess, square, color) {
+  let n = 0;
+  for (const sq of ALL_SQUARES) if (chess.attackers(sq, color).includes(square)) n++;
+  return n;
+}
+
+// Одна-две короткие фразы для подсказки «что здесь играют»: например,
+// «Выводит коня в игру и бьёт центр (e5). Потом можно сделать рокировку».
+export function moveIdea(fenBefore, move) {
+  const before = new Chess(fenBefore);
+  const c = new Chess(fenBefore);
+  let m;
+  try {
+    m = c.move(move);
+  } catch {
+    return '';
+  }
+  if (c.isCheckmate()) return 'Мат — партия окончена!';
+  const me = m.color;
+  const opp = me === 'w' ? 'b' : 'w';
+  const out = [];
+  const later = [];
+
+  if (m.flags.includes('k') || m.flags.includes('q')) out.push('Рокировка: король уходит в безопасный угол, а ладья включается в игру');
+  if (m.captured) {
+    // забрали обратно то, что соперник только что взял? (на этой клетке стояла наша фигура до его хода — не знаем,
+    // поэтому просто говорим, что забирает и сколько это очков)
+    out.push(`Забирает ${ACC[m.captured]} на ${m.to} (+${VAL[m.captured]} ${VAL[m.captured] === 1 ? 'очко' : 'очка'})`);
+  }
+  if (c.inCheck()) out.push('Шах — соперник обязан защищаться');
+
+  // нападение: какие фигуры соперника теперь бьёт сходившая фигура
+  let target = null;
+  for (const sq of ALL_SQUARES) {
+    const p = c.get(sq);
+    if (!p || p.color !== opp || p.type === 'k') continue;
+    if (!c.attackers(sq, me).includes(m.to)) continue;
+    const defended = c.attackers(sq, opp).length > 0;
+    if (!defended || VAL[p.type] > VAL[m.piece]) {
+      if (!target || VAL[p.type] > VAL[target.type]) target = { type: p.type, sq, defended };
+    }
+  }
+  if (target) {
+    const fem = target.type === 'p' || target.type === 'r';
+    const must = target.type === 'p' ? (fem ? 'её защищать' : 'его защищать') : fem ? 'её спасать' : 'его спасать';
+    later.push(`нападает на ${ACC[target.type]} ${target.sq} — соперник должен ${must}`);
+  }
+
+  // развитие лёгкой фигуры с последней горизонтали
+  const home = me === 'w' ? '1' : '8';
+  if ((m.piece === 'n' || m.piece === 'b') && m.from[1] === home) {
+    const hits = CENTER.filter((sq) => c.attackers(sq, me).includes(m.to));
+    out.push(`Выводит ${ACC[m.piece]} в игру${hits.length ? ` и бьёт центр (${hits.join(', ')})` : ''}`);
+  }
+  // пешка в центр
+  if (m.piece === 'p' && CENTER.includes(m.to)) out.push('Пешка занимает центр');
+
+  // открывает дорогу слону/ферзю
+  if (m.piece === 'p') {
+    const opened = [];
+    for (const sq of ALL_SQUARES) {
+      const p = c.get(sq);
+      if (!p || p.color !== me || (p.type !== 'b' && p.type !== 'q') || sq[1] !== home) continue;
+      if (reach(c, sq, me) >= reach(before, sq, me) + 2) opened.push(`${DAT[p.type]} ${sq}`);
+    }
+    if (opened.length) later.push(`открывает дорогу ${opened.slice(0, 2).join(' и ')}`);
+  }
+  // уводит фигуру из-под удара
+  const wasAttacked = before.attackers(m.from, opp);
+  if (!m.captured && m.piece !== 'p' && wasAttacked.length && !c.attackers(m.to, opp).length) {
+    const cheapest = Math.min(...wasAttacked.map((sq) => VAL[before.get(sq).type]));
+    if (!before.attackers(m.from, me).length || cheapest < VAL[m.piece]) out.unshift(`Уводит ${ACC[m.piece]} из-под удара`);
+  }
+  // готовит рокировку: между королём и ладьёй стало пусто
+  const rights = fenBefore.split(' ')[2];
+  const kSide = me === 'w' ? 'K' : 'k';
+  if (rights.includes(kSide) && !m.flags.includes('k')) {
+    const between = me === 'w' ? ['f1', 'g1'] : ['f8', 'g8'];
+    const emptyNow = between.every((sq) => !c.get(sq));
+    const emptyBefore = between.every((sq) => !before.get(sq));
+    if (emptyNow && !emptyBefore && m.piece !== 'k' && m.piece !== 'r') later.push('потом можно сделать рокировку');
+  }
+
+  const first = out.slice(0, 2).join('. ');
+  const next = later.slice(0, 1).join('');
+  if (!first && !next) return 'Спокойный полезный ход: ничего не подставляет.';
+  if (!first) return next[0].toUpperCase() + next.slice(1) + '.';
+  return `${first}${next ? `. ${next[0].toUpperCase() + next.slice(1)}` : ''}.`;
+}
+
 // ─── предпросмотр «что будет» ───
 
 const BRUSH = { g: 'green', r: 'red', b: 'blue', y: 'yellow' };

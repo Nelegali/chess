@@ -2081,9 +2081,6 @@ body[data-view='drill'] .update-bar {
   background: #8e44ad;
   height: 6px;
 }
-.v-book {
-  --v: var(--accent);
-}
 .free-opening {
   margin: 0 0 10px;
   padding: 7px 10px;
@@ -2105,20 +2102,30 @@ body[data-view='drill'] .update-bar {
 .fo-sub:empty {
   display: none;
 }
-.turn-chip {
-  font-size: 0.8rem;
-  font-weight: 700;
-  padding: 3px 10px;
+.mat-chip {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: var(--surface-2);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  cursor: pointer;
 }
-.turn-chip.me {
+.mat-chip.me b {
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 16%, transparent);
 }
-.turn-chip.opp {
-  color: var(--purple);
-  background: color-mix(in srgb, var(--purple) 16%, transparent);
+.mat-chip.opp b {
+  color: var(--red);
+}
+.why-more summary {
+  cursor: pointer;
+  color: var(--blue);
+  font-size: 0.9rem;
+}
+.why-more .explain {
+  margin-top: 6px;
 }
 .cands {
   margin-bottom: 12px;
@@ -2170,8 +2177,12 @@ body[data-view='drill'] .update-bar {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.c-note.coach {
-  color: var(--muted);
+.c-idea {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+  font-size: 0.82rem;
+  line-height: 1.35;
+  color: var(--text);
 }
 .link-btn {
   padding: 0;
@@ -2213,6 +2224,301 @@ body[data-view='drill'] .update-bar {
 .ml-move.future {
   color: var(--muted);
   font-weight: 400;
+}
+
+/* ───── оценка хода: плашка, подсветка клеток, вспышка доски ───── */
+
+.verdict-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--v) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--v) 45%, transparent);
+  color: var(--text);
+  line-height: 1.3;
+}
+.verdict-banner b {
+  display: block;
+  color: var(--v);
+  font-size: 1.05rem;
+}
+.vb-icon {
+  font-size: 1.6rem;
+  line-height: 1;
+}
+.vb-note {
+  display: block;
+  font-size: 0.85rem;
+}
+.verdict-banner.v-blunder,
+.verdict-banner.v-mistake {
+  animation: vb-pop 0.45s ease-out;
+}
+@keyframes vb-pop {
+  0% {
+    transform: scale(0.92);
+  }
+  60% {
+    transform: scale(1.03);
+  }
+}
+.v-book {
+  --v: var(--blue);
+}
+.move-card.vc-blunder {
+  border-left: 6px solid var(--red);
+  background: color-mix(in srgb, var(--red) 7%, var(--surface));
+}
+.move-card.vc-mistake {
+  border-left: 6px solid #e8833a;
+  background: color-mix(in srgb, #e8833a 7%, var(--surface));
+}
+.move-card.vc-dubious {
+  border-left: 6px solid var(--gold);
+}
+.move-card.vc-good {
+  border-left: 6px solid var(--accent);
+}
+.move-card.vc-book {
+  border-left: 6px solid var(--blue);
+}
+.wrong-msg.vc-blunder,
+.wrong-msg.vc-mistake {
+  border-left: 6px solid var(--red);
+}
+.wrong-msg.vc-dubious {
+  border-left: 6px solid var(--gold);
+}
+.wrong-msg.vc-ok,
+.wrong-msg.vc-good {
+  border-left: 6px solid var(--accent);
+}
+cg-board square.mark-bad {
+  background-color: rgba(214, 69, 69, 0.45);
+}
+cg-board square.mark-warn {
+  background-color: rgba(214, 160, 20, 0.4);
+}
+cg-board square.mark-good {
+  background-color: rgba(90, 170, 50, 0.4);
+}
+/* фигура, которую соперник заберёт в ответ на ошибку */
+cg-board square.mark-lost {
+  box-shadow: inset 0 0 0 5px rgba(214, 40, 40, 0.95);
+  animation: lost-blink 1s ease-in-out 3;
+}
+@keyframes lost-blink {
+  50% {
+    box-shadow: inset 0 0 0 5px rgba(214, 40, 40, 0.2);
+  }
+}
+.cg-wrap.fx-good {
+  animation: fx-good 1s ease-out;
+}
+.cg-wrap.fx-bad {
+  animation: fx-bad 1s ease-out;
+}
+.board.shake.fx-bad {
+  animation:
+    shake 0.35s,
+    fx-bad 1s ease-out;
+}
+@keyframes fx-good {
+  0% {
+    box-shadow: 0 0 0 0 rgba(110, 190, 60, 0.9);
+  }
+  100% {
+    box-shadow: 0 0 0 18px rgba(110, 190, 60, 0);
+  }
+}
+@keyframes fx-bad {
+  0% {
+    box-shadow: 0 0 0 0 rgba(220, 50, 50, 0.95);
+  }
+  100% {
+    box-shadow: 0 0 0 22px rgba(220, 50, 50, 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .verdict-banner,
+  .cg-wrap.fx-good,
+  .cg-wrap.fx-bad,
+  .board.shake.fx-bad,
+  cg-board square.mark-lost {
+    animation: none;
+  }
+}
+
+/* насколько популярен ход */
+.pop-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 0.88rem;
+}
+.pop-line.rare {
+  color: var(--muted);
+}
+.pop-bar {
+  flex: 0 0 56px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.pop-bar i {
+  display: block;
+  height: 100%;
+  background: var(--purple);
+}
+
+/* очки: стоимость фигур на доске */
+.material {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin: 0 0 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+.mat-side {
+  white-space: nowrap;
+}
+.mat-took {
+  letter-spacing: -2px;
+  color: var(--muted);
+}
+.mat-diff {
+  font-weight: 700;
+  white-space: nowrap;
+}
+.mat-diff.me {
+  color: var(--accent);
+}
+.mat-diff.opp {
+  color: var(--red);
+}
+
+/* ───── свободная игра: страницы под доской (на телефоне листаются свайпом) ───── */
+
+.pager-tabs,
+.phone-only {
+  display: none;
+}
+.last-sum {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  width: 100%;
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-left-width: 5px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+.last-sum.vc-blunder,
+.last-sum.vc-mistake {
+  border-left-color: var(--red);
+}
+.last-sum.vc-dubious {
+  border-left-color: var(--gold);
+}
+.last-sum.vc-good {
+  border-left-color: var(--accent);
+}
+.last-sum.vc-book {
+  border-left-color: var(--blue);
+}
+.ls-more {
+  margin-left: auto;
+  color: var(--blue);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+@media (min-width: 761px) {
+  .page.desk-hidden,
+  .last-sum {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .desk-only {
+    display: none;
+  }
+  .phone-only {
+    display: inline;
+  }
+  p.phone-only {
+    display: block;
+  }
+  /* вкладки прилипают прямо под закреплённой доской */
+  .play.free .pager-tabs {
+    position: sticky;
+    top: calc(var(--topbar-h, 53px) + var(--phone-board));
+    z-index: 7;
+    display: flex;
+    gap: 2px;
+    margin: 0 -16px 10px;
+    padding: 0 12px;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .pager-tab {
+    flex: 1;
+    padding: 9px 2px 7px;
+    border: 0;
+    border-bottom: 3px solid transparent;
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .pager-tab.on {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+  .play.free .pager {
+    display: flex;
+    align-items: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scroll-snap-type: x mandatory;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    transition: height 0.2s;
+  }
+  .play.free .pager::-webkit-scrollbar {
+    display: none;
+  }
+  .play.free .page {
+    flex: 0 0 100%;
+    min-width: 0;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+  }
 }
 
 /* ───── урок на телефоне: доска закреплена, объяснение хода сразу под ней ───── */

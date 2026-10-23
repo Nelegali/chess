@@ -63,6 +63,27 @@ export function movesFor(chess, color) {
 }
 
 // Подсветка клеток и путей из текста — общая для главной доски и мини-досок.
+// Значок оценки хода в углу клетки — как «??» и «!» в анализе Lichess.
+const GLYPHS = {
+  blunder: ['#d64545', '??'],
+  mistake: ['#e07b2a', '?'],
+  dubious: ['#c99a06', '?!'],
+  good: ['#4c9a2a', '!'],
+  book: ['#2f7fd1', '★'],
+};
+export function glyphShape(square, verdict) {
+  const g = GLYPHS[verdict];
+  if (!g) return null;
+  const [color, text] = g;
+  const size = text.length > 1 ? 26 : 32;
+  return {
+    orig: square,
+    customSvg: {
+      html: `<circle cx="78" cy="22" r="20" fill="${color}" stroke="#fff" stroke-width="4"/><text x="78" y="${Math.round(22 + size * 0.36)}" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-weight="800" font-size="${size}" fill="#fff">${text}</text>`,
+    },
+  };
+}
+
 export const FLASH_MS = 1800;
 export const PATH_MS = 2200;
 export const circleShapes = (squares) => squares.map((sq) => ({ orig: sq, brush: 'blue' }));
@@ -208,6 +229,20 @@ export class Board {
     this.renderInsight();
   }
 
+  // Подсветка клеток цветом оценки хода: [[клетка, класс], …]. Сбрасывается при смене позиции.
+  setMarks(marks) {
+    this.marks = marks;
+    this.renderInsight();
+  }
+
+  // Вспышка всей доски: зелёная — хороший ход, красная (и встряска) — ошибка.
+  pulse(kind) {
+    this.el.classList.remove('fx-good', 'fx-bad');
+    void this.el.offsetWidth;
+    this.el.classList.add(kind === 'bad' ? 'fx-bad' : 'fx-good');
+    if (kind === 'bad') this.shake();
+  }
+
   setHint(square) {
     if (this.hint === square) return;
     this.hint = square;
@@ -261,6 +296,7 @@ export class Board {
         add(sq, !defended || cheapest < VALUE[p.type] ? 'attacked' : 'guarded');
       }
     }
+    for (const [sq, cls] of this.marks || []) add(sq, cls);
     if (this.hint) add(this.hint, 'hint-from');
     this.insightShapes = arrows;
     if (this.previewing) return;
@@ -303,6 +339,7 @@ export class Board {
 
   sync(lastMove) {
     this.focus = null;
+    this.marks = null;
     this.lastMove = lastMove;
     this.movableColor = null;
     this.previewing = false;
