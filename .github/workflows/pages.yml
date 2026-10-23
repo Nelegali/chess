@@ -1,10 +1,10 @@
 # Публикация на GitHub Pages: https://<пользователь>.github.io/<репозиторий>/
-# Включить: Settings → Pages → Source: GitHub Actions.
+# Один раз включить: Settings → Pages → Build and deployment → Source: GitHub Actions.
+# Дальше сайт обновляется сам после каждого push в основную ветку репозитория.
 name: Pages
 
 on:
   push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -18,6 +18,8 @@ concurrency:
 
 jobs:
   deploy:
+    # Публикуем только основную ветку (какой бы она ни была)
+    if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -29,9 +31,23 @@ jobs:
           node-version: 22
       - name: Проверка базы дебютов
         run: node tests/validate-openings.mjs
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - name: Проверить, что GitHub Pages включён
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${{ github.repository }}/pages" --silent 2>/dev/null; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::GitHub Pages не включён. Откройте Settings → Pages → Source: GitHub Actions и перезапустите этот workflow."
+          fi
+      - if: steps.pages.outputs.enabled == 'true'
+        uses: actions/configure-pages@v5
+      - if: steps.pages.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: public
-      - id: deployment
+      - if: steps.pages.outputs.enabled == 'true'
+        id: deployment
         uses: actions/deploy-pages@v4

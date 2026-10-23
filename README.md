@@ -60,9 +60,9 @@ server {
 
 ### Вариант 2. GitHub Pages (бесплатно, без сервера)
 
-1. Settings → Pages → Source: **GitHub Actions**.
-2. Влейте изменения в `main`: workflow `.github/workflows/pages.yml` опубликует папку `public/`.
-3. Адрес будет `https://nelegali.github.io/chess/`.
+1. Один раз: Settings → Pages → Build and deployment → Source: **GitHub Actions**.
+2. Workflow `.github/workflows/pages.yml` публикует папку `public/` после каждого push в основную ветку репозитория (запустить вручную: Actions → Pages → Run workflow).
+3. Адрес: `https://nelegali.github.io/chess/`.
 
 На GitHub Pages нет синхронизации между устройствами: прогресс хранится в браузере. Перенести его можно через Профиль → «Резервная копия». Для приватного репозитория GitHub Pages доступен только на платном тарифе.
 
