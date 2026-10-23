@@ -13,4 +13,5 @@ jobs:
         with:
           node-version: 22
       - run: node tests/validate-openings.mjs
+      - run: node tests/store.test.mjs
       - run: node --check server.js

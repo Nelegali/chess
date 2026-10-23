@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "test": "node tests/validate-openings.mjs"
+    "test": "node tests/validate-openings.mjs && node tests/store.test.mjs"
   },
   "engines": {
     "node": ">=18"

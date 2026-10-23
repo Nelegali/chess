@@ -29,8 +29,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Проверка базы дебютов
-        run: node tests/validate-openings.mjs
+      - name: Проверка базы дебютов и логики прогресса
+        run: npm test
       - name: Проверить, что GitHub Pages включён
         id: pages
         env:

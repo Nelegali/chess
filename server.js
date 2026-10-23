@@ -97,8 +97,25 @@ async function handleProgress(req, res) {
 const explorerCache = new Map();
 const EXPLORER_TTL = 24 * 60 * 60 * 1000;
 
+// Прокси пропускает только параметры, которые использует приложение, — чтобы чужие не тратили
+// твой токен Lichess произвольными запросами.
+const EXPLORER_PARAMS = {
+  variant: /^standard$/,
+  play: /^([a-h][1-8][a-h][1-8][qrbn]?)(,[a-h][1-8][a-h][1-8][qrbn]?){0,40}$|^$/,
+  speeds: /^[a-z,]{0,60}$/,
+  ratings: /^[0-9,]{0,40}$/,
+  moves: /^[0-9]{1,2}$/,
+  topGames: /^[0-9]$/,
+  recentGames: /^[0-9]$/,
+};
+
 async function handleExplorer(req, res, url) {
-  const key = url.searchParams.toString();
+  const clean = new URLSearchParams();
+  for (const [k, v] of url.searchParams) {
+    if (!EXPLORER_PARAMS[k] || !EXPLORER_PARAMS[k].test(v)) return send(res, 400, { error: `bad parameter ${k}` });
+    clean.set(k, v);
+  }
+  const key = clean.toString();
   const hit = explorerCache.get(key);
   if (hit && Date.now() - hit.t < EXPLORER_TTL) return send(res, 200, hit.body);
   try {
@@ -117,10 +134,16 @@ async function handleExplorer(req, res, url) {
 }
 
 async function serveStatic(req, res, url) {
-  let rel = decodeURIComponent(url.pathname);
+  let rel;
+  try {
+    rel = decodeURIComponent(url.pathname);
+  } catch {
+    return send(res, 400, { error: 'bad url' });
+  }
   if (rel.endsWith('/')) rel += 'index.html';
   const file = path.normalize(path.join(ROOT, rel));
-  if (!file.startsWith(ROOT)) return send(res, 403, { error: 'forbidden' });
+  // Строго внутри public/: проверка startsWith(ROOT) пропустила бы соседнюю папку «public-что-то».
+  if (file !== ROOT && !file.startsWith(ROOT + path.sep)) return send(res, 403, { error: 'forbidden' });
   try {
     const data = await fs.readFile(file);
     const ext = path.extname(file);

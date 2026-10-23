@@ -1,6 +1,6 @@
 import { OPENINGS, CATEGORIES, SIGNATURE, findLine, lineSide, allLines } from './openings.js';
 import * as store from './store.js';
-import { Board, Chess, parseArrows, threatArrows, sanToMove, moveLabel, figurine, PIECE_NAME } from './board.js';
+import { Board, Chess, parseArrows, threatArrows, sanToMove, moveLabel, figurine, PIECE_NAME, FLASH_MS, PATH_MS, circleShapes, pathArrows, destroyBoard, guardRedraw, hasSize } from './board.js';
 import { Chessground } from '../vendor/chessground.js';
 import { play as sound } from './sound.js';
 import * as lichess from './lichess.js';
@@ -28,8 +28,9 @@ const figText = (s) =>
 
 // Названия клеток (f7, e4…) — нажимаемые: подсвечивают клетку на доске.
 // Путь вида «e1–h4» или «b1–d2–f1–g3» рисуется стрелками.
+// Клетка во взятии («♘xe5», «dxc6») тоже нажимается.
 const squaresText = (s) =>
-  s.replace(/(^|[^A-Za-z0-9_])([a-h][1-8](?:–[a-h][1-8])*)(?![A-Za-z0-9])/g, (m, pre, text) =>
+  s.replace(/(^|[^A-Za-z0-9_]|[♔♕♖♗♘a-h]x)([a-h][1-8](?:–[a-h][1-8])*)(?![A-Za-z0-9])/g, (m, pre, text) =>
     text.includes('–')
       ? `${pre}<span class="sq path" data-path="${text.split('–').join(',')}">${text}</span>`
       : `${pre}<span class="sq" data-sq="${text}">${text}</span>`,
@@ -109,6 +110,7 @@ const turnAt = (fen) => fen.split(' ')[1];
 
 // Мини-доски тоже умеют подсвечивать клетки и пути, когда в тексте рядом нажали «f7» или «h4–e1».
 const boardAdapters = new WeakMap();
+const boardRedraw = new WeakMap();
 
 function miniBoard(el, fen, orientation, lastMove, shapes = [], coordinates = false) {
   const cg = Chessground(el, {
@@ -120,25 +122,33 @@ function miniBoard(el, fen, orientation, lastMove, shapes = [], coordinates = fa
     animation: { enabled: false },
     drawable: { enabled: false, visible: true, autoShapes: shapes },
   });
-  requestAnimationFrame(() => cg.redrawAll());
+  // Если доску создали в ещё скрытом блоке, после показа пересчитываем размеры (иначе стрелки кривые).
+  // Если пользователь уже ушёл со страницы — ничего не рисуем.
+  // Пока доска скрыта (свёрнутый раздел), не перерисовываем: стрелки посчитались бы для нулевого размера.
+  const shown = () => hasSize(el);
+  guardRedraw(cg, el);
+  const redrawAll = () => {
+    if (!shown()) return;
+    cg.redrawAll();
+    guardRedraw(cg, el);
+  };
+  requestAnimationFrame(redrawAll);
   let timer;
   const show = (extra, ms) => {
+    if (!shown()) return;
     clearTimeout(timer);
     cg.setAutoShapes([...shapes, ...extra]);
-    timer = setTimeout(() => el.isConnected && cg.setAutoShapes(shapes), ms);
+    timer = setTimeout(() => shown() && cg.setAutoShapes(shapes), ms);
   };
+  boardRedraw.set(el, () => requestAnimationFrame(redrawAll));
   boardAdapters.set(el, {
     el,
-    flash: (squares) => show(squares.map((sq) => ({ orig: sq, brush: 'blue' })), 1800),
-    flashPath: (path) =>
-      show(
-        path.slice(1).map((sq, i) => ({ orig: path[i], dest: sq, brush: 'blue' })),
-        2200,
-      ),
+    flash: (squares) => show(circleShapes(squares), FLASH_MS),
+    flashPath: (path) => show(pathArrows(path), PATH_MS),
   });
   onCleanup(() => {
     clearTimeout(timer);
-    cg.destroy();
+    destroyBoard(cg);
   });
   return cg;
 }
@@ -676,7 +686,7 @@ function learnView(lineId) {
               (a, i) => `<button type="button" class="alt-card" data-alt="${i}">
                 <span class="alt-move">Вместо ${moveLabel(ply - 1, clean(step.m))} → <b>${moveLabel(ply - 1, clean(a.steps[0].m))}</b> ${annBadge(a.steps[0].m)}</span>
                 <span class="alt-name">${esc(a.label)}</span>
-                ${a.intro ? `<span class="alt-intro">${rich(a.intro)}</span>` : ''}
+                ${a.intro ? `<span class="alt-intro">${figText(esc(a.intro))}</span>` : ''}
                 <span class="alt-cta">▶ Разыграть на доске</span>
               </button>`,
             )
@@ -949,7 +959,7 @@ function learnView(lineId) {
         tr.innerHTML = `<td colspan="3">
           ${body2}
           <p class="muted small">${stats}</p>
-          ${e2 ? `<div class="wn-actions"><button type="button" class="btn tiny" data-peek="ex">👀 Что будет на доске</button>${e2.demo ? '<button type="button" class="btn tiny" data-demo="ex">▶ Разыграть по ходам</button>' : ''}</div><div class="wn-preview" hidden></div>` : ''}
+          ${e2 ? `<div class="wn-actions"><button type="button" class="btn tiny" data-peek="ex">👀 Что будет на доске</button>${e2.demo && !alt ? '<button type="button" class="btn tiny" data-demo="ex">▶ Разыграть по ходам</button>' : ''}</div><div class="wn-preview" hidden></div>` : ''}
         </td>`;
         row.after(tr);
         if (!e2) return;
@@ -1119,6 +1129,8 @@ function learnView(lineId) {
   }
 
   const onKey = (e) => {
+    if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;
+    if (document.querySelector('.modal-wrap')) return;
     if (e.key === 'ArrowRight') forward();
     if (e.key === 'ArrowLeft') back();
   };
@@ -1508,6 +1520,7 @@ function runQuiz(qs) {
       orientation: q.type === 'move' ? colorName(q.side) : 'white',
       onUserMove: (m) => answerMove(m),
     });
+    activeBoard = board;
     board.load(q.fen, q.last ? [q.last.from, q.last.to] : undefined);
 
     if (q.type === 'name') {
@@ -1815,7 +1828,12 @@ function mountDiagrams(root) {
     if (details && !details.open) {
       if (!details.dataset.watch) {
         details.dataset.watch = '1';
-        details.addEventListener('toggle', () => details.open && mountDiagrams(details));
+        details.addEventListener('toggle', () => {
+          if (!details.open) return;
+          mountDiagrams(details);
+          // уже созданные схемы могли быть скрыты — пересчитываем их размеры
+          details.querySelectorAll('[data-diagram][data-mounted]').forEach((x) => boardRedraw.get(x)?.());
+        });
       }
       return;
     }
@@ -1995,20 +2013,24 @@ function route() {
 
 window.addEventListener('hashchange', route);
 // На компьютере клетка подсвечивается уже при наведении мыши.
-document.addEventListener('mouseover', (e) => {
+document.addEventListener('pointerover', (e) => {
+  if (e.pointerType !== 'mouse') return;
   const sq = e.target.closest && e.target.closest('.sq');
   if (sq) flashSquareLink(sq, false);
 });
 
-// Какой доске показывать клетку: схеме в том же разделе (теория, карточка варианта),
-// иначе — главной доске экрана.
+// Какой доске показывать клетку: ищем ближайшую видимую мини-доску, поднимаясь от ссылки
+// вверх (подпись под доской → карточка → раздел), но не выходя за пределы карточки, панели
+// или окна. Не нашли — главная доска экрана; внутри окна (теория поверх доски) — никакая.
+const BOARD_SCOPE_END = '.wn-item, .wrong-msg, .ex-detail, .alt-card, .panel, .modal, #app';
+const isVisible = (el) => el.getClientRects().length > 0;
 function targetBoardFor(link) {
-  const scope = link.closest('.wn-item, .ex-detail, .diagram, details, .modal');
-  if (scope) {
-    const el = [...scope.querySelectorAll('.cg-wrap')].find((x) => boardAdapters.has(x));
+  for (let node = link.parentElement; node; node = node.parentElement) {
+    const el = [...node.querySelectorAll('.cg-wrap')].find((x) => boardAdapters.has(x) && isVisible(x));
     if (el) return boardAdapters.get(el);
+    if (node.matches(BOARD_SCOPE_END)) break;
   }
-  return activeBoard;
+  return link.closest('.modal') ? null : activeBoard;
 }
 
 function flashSquareLink(link, scrollToBoard) {
@@ -2026,7 +2048,7 @@ function flashSquareLink(link, scrollToBoard) {
 // не меняет адрес, поэтому перерисовываем вручную.
 document.addEventListener('click', (e) => {
   const sq = e.target.closest('.sq');
-  if (sq) flashSquareLink(sq, true);
+  if (sq && !sq.closest('button')) flashSquareLink(sq, true);
   const term = e.target.closest('.term');
   if (term) {
     e.preventDefault();

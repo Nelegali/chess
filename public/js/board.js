@@ -62,6 +62,70 @@ export function movesFor(chess, color) {
   }
 }
 
+// Подсветка клеток и путей из текста — общая для главной доски и мини-досок.
+export const FLASH_MS = 1800;
+export const PATH_MS = 2200;
+export const circleShapes = (squares) => squares.map((sq) => ({ orig: sq, brush: 'blue' }));
+export const pathArrows = (path) => path.slice(1).map((sq, i) => ({ orig: path[i], dest: sq, brush: 'blue' }));
+
+// Доска на странице и имеет ненулевой размер (не в свёрнутом разделе, не на скрытом экране).
+export function hasSize(node) {
+  if (!node.isConnected) return false;
+  const r = node.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
+
+const resizeWatchers = new WeakMap();
+
+// Защита перерисовки: chessground откладывает перерисовку на следующий кадр и не проверяет,
+// что доска к тому моменту ещё на странице и видима. Кроме того, он запоминает размер доски:
+// если доску прятали, запомненный размер — 0×0, и при повторном показе стрелки получали
+// координаты NaN (в консоли — «attribute y2: Expected length, NaN»). Поэтому перед каждой
+// перерисовкой проверяем настоящий размер доски и сбрасываем устаревший запомненный.
+// Пропущенная пока доска скрыта перерисовка выполняется, когда доска снова получает размер.
+// Вызывать после создания доски и после каждого redrawAll (он пересоздаёт state.dom).
+export function guardRedraw(cg, el) {
+  const dom = cg.state.dom;
+  const original = dom.redrawNow;
+  const ok = () => {
+    if (dom.destroyed || !el.isConnected) return false;
+    const r = dom.elements.board.getBoundingClientRect();
+    if (!r.width || !r.height) return false;
+    const b = dom.bounds();
+    if (b.width !== r.width || b.height !== r.height || b.left !== r.left || b.top !== r.top) dom.bounds.clear();
+    return true;
+  };
+  let pending = false;
+  dom.redrawNow = (skipSvg) => ok() && original(skipSvg);
+  dom.redraw = () => {
+    if (pending) return;
+    pending = true;
+    requestAnimationFrame(() => {
+      pending = false;
+      if (ok()) original();
+    });
+  };
+  if (!resizeWatchers.has(el) && 'ResizeObserver' in window) {
+    // cg.state.dom берём в момент вызова: после redrawAll это уже новая, тоже защищённая версия.
+    const watcher = new ResizeObserver(() => hasSize(el) && !cg.state.dom.destroyed && cg.state.dom.redraw());
+    watcher.observe(el);
+    resizeWatchers.set(el, watcher);
+  }
+}
+
+// Уничтожить доску chessground без «хвостов»: её отложенная перерисовка (в следующем кадре)
+// не проверяет, что доска уже убрана, и рисовала бы стрелки на отсоединённом элементе
+// нулевого размера (в консоли — «attribute x1: Expected length, NaN»). Очищаем стрелки заранее.
+export function destroyBoard(cg) {
+  const wrap = cg.state.dom.elements.wrap;
+  resizeWatchers.get(wrap)?.disconnect();
+  resizeWatchers.delete(wrap);
+  cg.state.drawable.autoShapes = [];
+  cg.state.drawable.shapes = [];
+  cg.state.drawable.current = undefined;
+  cg.destroy();
+}
+
 export function toDests(chess) {
   const dests = new Map();
   for (const m of chess.moves({ verbose: true })) {
@@ -128,6 +192,7 @@ export class Board {
       },
       events: { select: (key) => this.onSelect(key) },
     });
+    guardRedraw(this.cg, el);
   }
 
   // Нажатие на фигуру соперника показывает, куда она может пойти и на что нападает.
@@ -282,6 +347,7 @@ export class Board {
     if (!this.el.isConnected) return;
     clearTimeout(this.flashTimer);
     this.previewing = true;
+    this.previewShapes = shapes;
     this.cg.set({ fen, lastMove, check: false, movable: { color: undefined, dests: new Map() }, highlight: { custom: new Map() } });
     this.cg.setAutoShapes(shapes);
   }
@@ -296,24 +362,25 @@ export class Board {
 
   // Ненадолго показать путь стрелками (когда в тексте нажали на «e1–h4»).
   flashPath(squares) {
-    if (!this.el.isConnected || this.previewing) return;
-    clearTimeout(this.flashTimer);
-    const arrows = [];
-    for (let i = 1; i < squares.length; i++) arrows.push({ orig: squares[i - 1], dest: squares[i], brush: 'blue' });
-    this.applyShapes(arrows);
-    this.flashTimer = setTimeout(() => {
-      if (!this.previewing && this.el.isConnected) this.applyShapes();
-    }, 2200);
+    this.flashShapes(pathArrows(squares), PATH_MS);
   }
 
   // Ненадолго подсветить клетки (когда в тексте нажали на «f7»).
   flash(squares) {
-    if (!this.el.isConnected || this.previewing) return;
+    this.flashShapes(circleShapes(squares), FLASH_MS);
+  }
+
+  // Подсветка работает и поверх предпросмотра (курсор над карточкой варианта).
+  flashShapes(extra, ms) {
+    if (!this.el.isConnected) return;
     clearTimeout(this.flashTimer);
-    this.applyShapes(squares.map((sq) => ({ orig: sq, brush: 'blue' })));
+    if (this.previewing) this.cg.setAutoShapes([...(this.previewShapes || []), ...extra]);
+    else this.applyShapes(extra);
     this.flashTimer = setTimeout(() => {
-      if (!this.previewing && this.el.isConnected) this.applyShapes();
-    }, 1800);
+      if (!this.el.isConnected) return;
+      if (this.previewing) this.cg.setAutoShapes(this.previewShapes || []);
+      else this.applyShapes();
+    }, ms);
   }
 
   orientation(o) {
@@ -329,7 +396,7 @@ export class Board {
   destroy() {
     clearTimeout(this.flashTimer);
     clearTimeout(this.previewTimer);
-    this.cg.destroy();
+    destroyBoard(this.cg);
   }
 }
 
