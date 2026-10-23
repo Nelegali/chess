@@ -2245,9 +2245,16 @@ function freeView() {
   onCleanup(() => window.removeEventListener('resize', onResize));
 
   // Высота ленты — по открытой странице, чтобы под короткой страницей не было пустоты.
+  // Только когда страницы листаются (телефон): на компьютере они стоят рядом/друг под другом,
+  // и фиксированная высота обрезала бы их — панель кнопок наезжала на список ходов.
   function fitPagerHeight() {
     const pager = body.querySelector('#pager');
-    const el = pager && pager.querySelector(`[data-page="${page}"]`);
+    if (!pager) return;
+    if (pager.scrollWidth <= pager.clientWidth + 1) {
+      pager.style.height = '';
+      return;
+    }
+    const el = pager.querySelector(`[data-page="${page}"]`);
     if (el) pager.style.height = `${el.offsetHeight}px`;
   }
 
