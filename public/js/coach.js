@@ -72,6 +72,11 @@ for (const opening of OPENINGS) {
   }
 }
 
+// Что база знает о позиции: основные ходы вариантов (с ply) и разобранные ответвления (с altDef).
+export function bookMoves(fen) {
+  return INDEX.get(posKey(fen)) || [];
+}
+
 // ─── предпросмотр «что будет» ───
 
 const BRUSH = { g: 'green', r: 'red', b: 'blue', y: 'yellow' };
@@ -345,9 +350,11 @@ function explainCore(fenBefore, alt, theory, { lineId, ply, reveal = true } = {}
   // 5. Ничего плохого не нашли
   return result(
     'ok',
-    reveal && theory
-      ? `Так тоже можно, но это не план дебюта. ${theoryFig}: ${firstSentence(OPENINGS_TEXT(lineId, ply) || '')}`.trim()
-      : 'Так тоже можно, но в этом дебюте план другой. Вспомни, что мы учили!',
+    !theory
+      ? 'Нормальный ход: фигуры не подставлены, явных ошибок нет.'
+      : reveal
+        ? `Так тоже можно, но это не план дебюта. ${theoryFig}: ${firstSentence(OPENINGS_TEXT(lineId, ply) || '')}`.trim()
+        : 'Так тоже можно, но в этом дебюте план другой. Вспомни, что мы учили!',
   );
 }
 

@@ -188,6 +188,9 @@ export class Board {
           oppMove: { key: 'om', color: '#4a4a4a', opacity: 0.5, lineWidth: 4 },
           oppMoveStrong: { key: 'oms', color: '#3a3a3a', opacity: 0.8, lineWidth: 7 },
           oppCapture: { key: 'oc', color: '#d0021b', opacity: 0.9, lineWidth: 8 },
+          // свободная игра: популярные ходы (толщина стрелки — насколько часто играют)
+          cand: { key: 'cd', color: '#8e44ad', opacity: 0.7, lineWidth: 10 },
+          candMine: { key: 'cm', color: '#15781b', opacity: 0.6, lineWidth: 10 },
         },
       },
       events: { select: (key) => this.onSelect(key) },

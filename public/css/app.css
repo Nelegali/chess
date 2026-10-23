@@ -2071,6 +2071,150 @@ body[data-view='drill'] .update-bar {
   box-shadow: inset 0 0 0 1px #cfcac2;
 }
 
+/* ───── свободная игра ───── */
+
+.mode-tag.free {
+  background: color-mix(in srgb, var(--purple) 20%, transparent);
+  color: var(--purple);
+}
+.lg.p {
+  background: #8e44ad;
+  height: 6px;
+}
+.v-book {
+  --v: var(--accent);
+}
+.free-opening {
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+.free-opening.off {
+  background: var(--surface-2);
+}
+.free-opening a {
+  color: inherit;
+}
+.fo-sub {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+.fo-sub:empty {
+  display: none;
+}
+.turn-chip {
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.turn-chip.me {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.turn-chip.opp {
+  color: var(--purple);
+  background: color-mix(in srgb, var(--purple) 16%, transparent);
+}
+.cands {
+  margin-bottom: 12px;
+}
+.cands-title {
+  font-weight: 700;
+  font-size: 0.95rem;
+  margin: 2px 0 6px;
+}
+.cand {
+  display: grid;
+  grid-template-columns: 3.8em 2.8em minmax(0, 1fr);
+  align-items: center;
+  gap: 0 8px;
+  width: 100%;
+  margin-bottom: 5px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cand:hover,
+.cand:focus-visible {
+  border-color: var(--purple);
+  outline: none;
+}
+.cand.book {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+.c-san {
+  font-weight: 800;
+  white-space: nowrap;
+}
+.c-pct {
+  text-align: right;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.c-note {
+  grid-column: 1 / -1;
+  font-size: 0.75rem;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.c-note.coach {
+  color: var(--muted);
+}
+.link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--blue);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.move-list {
+  margin-bottom: 12px;
+}
+.ml {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 4px;
+  margin-bottom: 8px;
+}
+.ml-num {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-left: 4px;
+}
+.ml-move {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ml-move.cur {
+  background: color-mix(in srgb, var(--gold) 30%, transparent);
+}
+.ml-move.future {
+  color: var(--muted);
+  font-weight: 400;
+}
+
 /* ───── урок на телефоне: доска закреплена, объяснение хода сразу под ней ───── */
 
 .board-stage {
@@ -2127,7 +2271,7 @@ body[data-view='drill'] .update-bar {
     align-self: center;
     margin: 0;
   }
-  .play.lesson #theory-btn {
+  .play.lesson .sub-row > .btn {
     grid-area: theory;
     align-self: center;
   }

@@ -330,6 +330,7 @@ function homeView() {
         <div class="row">
           ${due.length && next ? `<a class="btn" href="#/learn/${next.line.id}">📖 Новое</a>` : ''}
           <a class="btn" href="#/quiz">❓ Викторина</a>
+          <a class="btn" href="#/free">♟ Свободная игра</a>
         </div>
         <a class="basics-link" href="#/theory">📚 Новичок? Как ходят фигуры, как читать ходы и что значат названия дебютов →</a>
       </div>
@@ -490,14 +491,8 @@ function openingView(id) {
 
 // ─────────────────────────── изучение ───────────────────────────
 
-function playLayout(opening, line, mode) {
-  return `
-    <div class="play lesson">
-      <div class="board-col">
-        <div class="board-stage">
-          <div class="board" id="board"></div>
-          <div class="preview-badge" id="preview-badge" hidden></div>
-        </div>
+// Кнопка «Куда может пойти соперник» и пояснение к её стрелкам — общие для урока и свободной игры.
+const INSIGHT_TOOLS = `
         <div class="board-tools">
           <button type="button" class="btn tiny insight-btn" id="insight-btn" aria-pressed="false">👁 <span class="lbl-full">Куда может пойти соперник</span><span class="lbl-short">Соперник</span></button>
         </div>
@@ -508,7 +503,17 @@ function playLayout(opening, line, mode) {
           <span><i class="ins ring"></i>твоя фигура под ударом</span>
           <span><i class="ins ring guarded"></i>под ударом, но защищена</span>
           <span class="muted">Нажми на фигуру соперника — покажу только её ходы.</span>
-        </p>
+        </p>`;
+
+function playLayout(opening, line, mode) {
+  return `
+    <div class="play lesson">
+      <div class="board-col">
+        <div class="board-stage">
+          <div class="board" id="board"></div>
+          <div class="preview-badge" id="preview-badge" hidden></div>
+        </div>
+        ${INSIGHT_TOOLS}
         <div class="legend">
           <span><i class="lg g"></i>идея</span>
           <span><i class="lg r"></i>угроза</span>
@@ -1604,6 +1609,472 @@ function runQuiz(qs) {
   show();
 }
 
+// ─────────────────────────── свободная игра ───────────────────────────
+// Играешь как хочешь: приложение пишет, какой дебют получается, а на ходу соперника
+// показывает его самые популярные ответы (Lichess + наша база) — ты выбираешь, как он сыграет.
+
+const FREE_KEY = 'free-game';
+
+function loadFreeGame() {
+  try {
+    const g = JSON.parse(localStorage.getItem(FREE_KEY) || 'null');
+    if (g && (g.side === 'w' || g.side === 'b') && Array.isArray(g.sans)) return g;
+  } catch {}
+  return { side: 'w', sans: [], cursor: 0 };
+}
+
+function freeLayout(side) {
+  return `
+    <div class="play lesson free">
+      <div class="board-col">
+        <div class="board-stage">
+          <div class="board" id="board"></div>
+        </div>
+        ${INSIGHT_TOOLS}
+        <div class="legend">
+          <span><i class="lg p"></i>популярный ход соперника (чем толще — тем чаще)</span>
+          <span><i class="lg g"></i>идея хода по теории</span>
+        </div>
+        <p class="version-note muted">${versionText()}</p>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <div class="mode-tag free">♟ Свободная игра</div>
+          <h2>Играй и смотри, что получается</h2>
+          <div class="sub-row">
+            <p class="muted" id="side-label">Ты играешь ${sideName(side)}</p>
+            <button type="button" class="btn tiny" id="side-btn" aria-label="Сменить цвет">⇅ <span class="lbl-theory">${side === 'w' ? 'За чёрных' : 'За белых'}</span></button>
+          </div>
+          <div class="dots" id="dots"></div>
+        </div>
+        <div id="panel-body"></div>
+      </div>
+    </div>`;
+}
+
+function freeView() {
+  renderTopbar({ back: '#/', title: 'Свободная игра' });
+  renderTabbar(null);
+
+  const saved = loadFreeGame();
+  let side = saved.side;
+  // Партия: сделанные ходы и позиции (fens[i] — до хода i). cursor — сколько ходов сейчас на доске;
+  // ходы дальше cursor можно вернуть кнопкой ▶, пока не сыгран другой ход.
+  const moves = [];
+  const fens = [new Chess().fen()];
+  {
+    const c = new Chess();
+    for (const san of saved.sans) {
+      try {
+        moves.push(c.move(san));
+        fens.push(c.fen());
+      } catch {
+        break;
+      }
+    }
+  }
+  let cursor = Math.min(Math.max(0, saved.cursor ?? moves.length), moves.length);
+  let showMine = false; // подсказка «что здесь играют» на своём ходу
+  const explorerData = new Map(); // позиция → { data } | { error } | 'loading'
+  let alive = true; // статистика может прийти, когда экран уже закрыт
+  onCleanup(() => (alive = false));
+
+  app.innerHTML = freeLayout(side);
+  const body = app.querySelector('#panel-body');
+  const board = new Board(app.querySelector('#board'), { orientation: colorName(side), myColor: side, onUserMove });
+  onCleanup(() => board.destroy());
+  setupInsight(board);
+  activeBoard = board;
+  onCleanup(() => (activeBoard = null));
+
+  const fen = () => fens[cursor];
+  const save = () => {
+    try {
+      localStorage.setItem(FREE_KEY, JSON.stringify({ side, sans: moves.map((m) => m.san), cursor }));
+    } catch {}
+  };
+  const uci = (m) => m.from + m.to + (m.promotion || '');
+  // Основные ходы вариантов из базы в позиции и сыгранный ход i, если он «по книге».
+  const bookMain = (f) => coach.bookMoves(f).filter((e) => e.ply !== undefined);
+  const bookFor = (i) => bookMain(fens[i]).filter((e) => e.san === moves[i].san);
+
+  // Какой дебют на доске: последний ход «по книге» (с учётом перестановки ходов).
+  function detect() {
+    let lastBook = -1;
+    let entries = [];
+    for (let i = 0; i < cursor; i++) {
+      const es = bookFor(i);
+      if (es.length) {
+        lastBook = i;
+        entries = es;
+      }
+    }
+    return { lastBook, entries, inBook: cursor > 0 && lastBook === cursor - 1 };
+  }
+
+  // Названия дебютов из записей базы: сначала обычные дебюты, ловушки — отдельно.
+  function namesOf(entries) {
+    const openings = [];
+    const traps = [];
+    for (const e of entries) {
+      const list = e.trap ? traps : openings;
+      if (!list.find((x) => x.opening === e.opening)) list.push({ opening: e.opening, line: e.line, ply: e.ply });
+    }
+    return { openings, traps };
+  }
+
+  // Строка «что разыгрывается». Пока подходит много дебютов (например, после 1.e4) — перечисляем их,
+  // когда дебют определился — пишем вариант и сколько ходов из него уже сыграно.
+  function openingStatus() {
+    if (cursor === 0) return '';
+    const d = detect();
+    const ex = explorerData.get(fen());
+    // английское название с Lichess нужно, только когда своего точного названия нет
+    const lichessName = ex && ex.data && ex.data.opening ? ` · на Lichess: ${esc(ex.data.opening.name)}` : '';
+    const link = (o) => `<a href="#/o/${o.opening.id}">${esc(o.opening.name)}</a>`;
+    if (d.inBook) {
+      const { openings, traps } = namesOf(d.entries);
+      if (openings.length >= 3) {
+        return `<div class="free-opening">📖 Подходит несколько дебютов: ${openings.slice(0, 4).map(link).join(', ')}${openings.length > 4 ? '…' : ''}<div class="fo-sub">${lichessName.replace(/^ · /, '')}</div></div>`;
+      }
+      const main = openings[0] || traps[0];
+      const title = openings.length === 2 ? `${link(openings[0])} или ${link(openings[1])}` : `${main.opening.category === 'trap' ? '⚠️ ' : ''}${link(main)}`;
+      const trap = traps.length && openings.length ? ` · ⚠️ ловушка ${link(traps[0])}` : '';
+      return `<div class="free-opening">📖 <b>${title}</b>
+          <div class="fo-sub">${esc(main.line.name)} · ход ${main.ply + 1} из ${main.line.steps.length} · <a href="#/learn/${main.line.id}">учить →</a>${trap}</div>
+        </div>`;
+    }
+    if (d.lastBook >= 0) {
+      const { openings, traps } = namesOf(d.entries);
+      return `<div class="free-opening off">🧭 Ушли из теории после <b>${moveLabel(d.lastBook, moves[d.lastBook].san)}</b>
+          <div class="fo-sub">Это была ${link(openings[0] || traps[0])}${lichessName}</div></div>`;
+    }
+    return `<div class="free-opening off">🧭 Такого начала нет в нашей базе<div class="fo-sub">${lichessName.replace(/^ · /, '')}</div></div>`;
+  }
+
+  // Разбор последнего хода: текст из теории, а если ход не по теории — оценка тренера.
+  function lastMoveCard() {
+    if (cursor === 0) {
+      return `<div class="move-card">
+          <div class="move-head"><span class="san">Начальная позиция</span><span class="who me">ты играешь ${sideName(side)}</span></div>
+          <p class="explain">Ходи на доске как хочешь. Я буду писать, какой дебют получается, а на ходу соперника покажу его самые популярные ответы — выбери, как он сыграет.</p>
+        </div>`;
+    }
+    const i = cursor - 1;
+    const m = moves[i];
+    const mover = turnAt(fens[i]);
+    let badge = '';
+    let text = '';
+    const book = bookFor(i);
+    if (book.length) {
+      badge = '<span class="wn-badge v-book">по теории</span>';
+      text = book[0].text;
+    } else {
+      const known = bookMain(fens[i]);
+      const theory = known.length ? sanToMove(fens[i], known[0].san) : null;
+      const e = coach.explain(fens[i], m, theory, known.length ? { lineId: known[0].line.id, ply: known[0].ply } : {});
+      badge = verdictBadge(e.verdict);
+      text = e.text + (theory ? ` По теории здесь играют ${figurine(known[0].san)}.` : '');
+    }
+    const c = new Chess(fen());
+    const over = c.isCheckmate()
+      ? `<div class="prompt done">🏁 Мат! Победили ${mover === 'w' ? 'белые' : 'чёрные'}.</div>`
+      : c.isDraw() || c.isStalemate()
+        ? '<div class="prompt done">🤝 Ничья.</div>'
+        : '';
+    return `<div class="move-card">
+        <div class="move-head"><span class="san">${moveLabel(i, m.san)}</span><span class="who ${mover === side ? 'me' : 'opp'}">${mover === side ? 'твой ход' : 'ход соперника'}</span>${badge}</div>
+        <p class="explain">${rich(text)}</p>
+      </div>${over}`;
+  }
+
+  // Варианты хода для стороны, которая ходит: статистика Lichess + ходы из базы.
+  function candidates() {
+    const f = fen();
+    const book = new Map();
+    for (const e of coach.bookMoves(f)) {
+      const label = e.altDef ? e.altDef.label : e.opening.name;
+      const b = book.get(e.san) || { labels: [], main: false };
+      if (!b.labels.includes(label)) b.labels.push(label);
+      if (e.ply !== undefined) b.main = true;
+      book.set(e.san, b);
+    }
+    const ex = explorerData.get(f);
+    const rows = [];
+    let total = 0;
+    if (ex && ex.data) {
+      total = ex.data.white + ex.data.draws + ex.data.black;
+      for (const m of ex.data.moves) {
+        const n = m.white + m.draws + m.black;
+        if (n) rows.push({ san: m.san, n, w: m.white, d: m.draws, b: m.black, book: book.get(m.san) });
+      }
+    }
+    for (const [san, b] of book) if (b.main && !rows.find((r) => r.san === san)) rows.push({ san, book: b });
+    // Ни статистики, ни теории (например, без токена Lichess и после выхода из базы) —
+    // предлагаем разумные ходы по оценке тренера, чтобы партию можно было продолжить.
+    if (!rows.length && ex && ex !== 'loading' && !(ex.data && ex.data.moves.length)) {
+      for (const m of sensibleMoves(f)) rows.push({ san: m.san, coachPick: true });
+    }
+    return rows
+      .map((r) => ({ ...r, move: sanToMove(f, r.san), share: total && r.n ? r.n / total : null }))
+      .filter((r) => r.move);
+  }
+
+  const sensibleCache = new Map();
+  function sensibleMoves(f) {
+    if (sensibleCache.has(f)) return sensibleCache.get(f);
+    const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+    const scored = [];
+    for (const m of new Chess(f).moves({ verbose: true })) {
+      const e = coach.explain(f, m, null, {});
+      if (e.verdict !== 'ok' && e.verdict !== 'good') continue;
+      let score = 0;
+      if (m.flags.includes('k') || m.flags.includes('q')) score += 6; // рокировка
+      if (m.captured) score += 2 + VALUE[m.captured];
+      if ((m.piece === 'n' || m.piece === 'b') && (m.from[1] === '1' || m.from[1] === '8')) score += 4; // развитие
+      if (m.piece === 'p' && (m.from[0] === 'd' || m.from[0] === 'e')) score += 3; // центр
+      if (m.san.includes('+')) score += 1;
+      scored.push({ m, score });
+    }
+    const out = scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map((x) => x.m);
+    sensibleCache.set(f, out);
+    return out;
+  }
+
+  function candidateArrows(rows, mine) {
+    return rows.slice(0, 6).map((r) => ({
+      orig: r.move.from,
+      dest: r.move.to,
+      brush: mine ? 'candMine' : 'cand',
+      modifiers: { lineWidth: r.share != null ? Math.round(3 + 13 * Math.min(1, r.share * 1.4)) : 8 },
+    }));
+  }
+
+  function candidatesHtml(rows, mine) {
+    const turn = turnAt(fen());
+    const ex = explorerData.get(fen());
+    const title = mine
+      ? `💡 Что здесь чаще играют ${sideName(turn)}`
+      : `Выбери ответ соперника (${turn === 'w' ? 'белые' : 'чёрные'}):`;
+    const loading = ex === 'loading' ? '<p class="muted small">Загружаю статистику Lichess…</p>' : '';
+    const noStats =
+      ex && ex.error
+        ? `<p class="muted small">Проценты популярности берутся из статистики Lichess — сейчас она недоступна. <button type="button" class="link-btn" id="ex-help-btn">Подключить</button></p><div id="ex-help"></div>`
+        : '';
+    const list = rows.length
+      ? rows
+          .map((r, k) => {
+            const n = r.n || 0;
+            const pct = r.share != null ? `${Math.round(r.share * 100)}%` : '';
+            const bar = n
+              ? `<span class="wdb"><i class="w" style="width:${(r.w / n) * 100}%"></i><i class="d" style="width:${(r.d / n) * 100}%"></i><i class="b" style="width:${(r.b / n) * 100}%"></i></span>`
+              : '';
+            const note = r.book
+              ? `<span class="c-note">★ ${r.book.labels.slice(0, 2).map(esc).join(' · ')}</span>`
+              : r.coachPick
+                ? '<span class="c-note coach">разумный ход по оценке тренера</span>'
+                : '';
+            return `<button type="button" class="cand ${r.book ? 'book' : ''}" data-k="${k}">
+                <span class="c-san">${figurine(r.san)}</span><span class="c-pct">${pct}</span><span class="c-bar">${bar}</span>${note}
+              </button>`;
+          })
+          .join('')
+      : `<p class="muted">${ex === 'loading' ? '' : 'Ни в нашей базе, ни в статистике нет ходов для этой позиции.'} Сделай ход за ${mine ? 'себя' : 'соперника'} на доске сам.</p>`;
+    return `<div class="cands">
+        <div class="cands-title">${title}</div>
+        ${list}
+        ${rows.some((r) => r.n) ? '<p class="muted small">% — как часто так играют на Lichess (игроки 1400–2000). Полоска: победы белых / ничьи / победы чёрных. ★ — ход из нашей базы.</p>' : ''}
+        ${loading}${noStats}
+        ${mine ? '' : '<p class="muted small">Можно и самому передвинуть фигуру соперника на доске.</p>'}
+      </div>`;
+  }
+
+  function loadExplorer() {
+    const f = fen();
+    if (explorerData.has(f)) return;
+    explorerData.set(f, 'loading');
+    lichess
+      .explorer(moves.slice(0, cursor).map(uci))
+      .then((data) => explorerData.set(f, { data }))
+      .catch((error) => explorerData.set(f, { error }))
+      .finally(() => {
+        if (alive && fen() === f) render();
+      });
+  }
+
+  function movesListHtml() {
+    if (!moves.length) return '';
+    const parts = moves.map((m, i) => {
+      const num = i % 2 === 0 ? `<span class="ml-num">${i / 2 + 1}.</span>` : '';
+      return `${num}<button type="button" class="ml-move ${i === cursor - 1 ? 'cur' : ''} ${i >= cursor ? 'future' : ''}" data-ply="${i + 1}">${figurine(m.san)}</button>`;
+    });
+    return `<div class="move-list"><div class="cands-title">Партия</div><div class="ml">${parts.join(' ')}</div>
+      <button type="button" class="btn tiny" id="free-restart">⟲ Начать заново</button></div>`;
+  }
+
+  let rows = [];
+
+  function render() {
+    const f = fen();
+    const c = new Chess(f);
+    const over = c.isGameOver();
+    const turn = c.turn();
+    const myTurn = turn === side;
+    const last = cursor > 0 ? moves[cursor - 1] : null;
+    board.load(f, last ? [last.from, last.to] : undefined);
+    if (!over) board.enable(turn);
+
+    const showCands = !over && (!myTurn || showMine);
+    if (showCands) loadExplorer();
+    rows = showCands ? candidates() : [];
+    const lastBook = cursor > 0 ? bookFor(cursor - 1) : [];
+    board.shapes(showCands ? candidateArrows(rows, myTurn) : lastBook.length ? parseArrows(lastBook[0].arrows) : []);
+    app.querySelector('#dots').innerHTML = `<span class="turn-chip ${myTurn ? 'me' : 'opp'}">${over ? 'Партия окончена' : myTurn ? `Твой ход (${turn === 'w' ? 'белые' : 'чёрные'})` : 'Ход соперника'}</span>`;
+
+    let mainBtn;
+    if (over) mainBtn = '<button class="btn primary" id="free-new">⟲ Новая партия</button>';
+    else if (!myTurn) mainBtn = `<button class="btn primary" id="free-random" ${rows.length ? '' : 'disabled'}>🎲 Ответ соперника</button>`;
+    else mainBtn = `<button class="btn" id="free-hint">💡 ${showMine ? 'Скрыть подсказку' : 'Что здесь играют?'}</button>`;
+
+    // На ходу соперника главное — выбрать его ответ, поэтому список идёт первым.
+    body.innerHTML = `
+      ${openingStatus()}
+      ${showCands && !myTurn ? candidatesHtml(rows, false) : ''}
+      ${lastMoveCard()}
+      ${showCands && myTurn ? candidatesHtml(rows, true) : ''}
+      ${!over && myTurn && !showMine ? `<div class="prompt mine">Твой ход ${sideName(turn)}: ходи на доске. Не знаешь, что играть, — нажми «💡 Что здесь играют?».</div>` : ''}
+      ${movesListHtml()}
+      <div class="actionbar">
+        <button class="btn nav" id="prev" ${cursor === 0 ? 'disabled' : ''} aria-label="Назад">◀</button>
+        ${mainBtn}
+        <button class="btn nav" id="next" ${cursor >= moves.length ? 'disabled' : ''} aria-label="Вперёд">▶</button>
+      </div>`;
+    bind();
+    save();
+  }
+
+  function bind() {
+    body.querySelector('#prev').onclick = back;
+    body.querySelector('#next').onclick = forward;
+    const q = (id) => body.querySelector(id);
+    if (q('#free-new')) q('#free-new').onclick = restart;
+    if (q('#free-random')) q('#free-random').onclick = playRandom;
+    if (q('#free-hint'))
+      q('#free-hint').onclick = () => {
+        showMine = !showMine;
+        render();
+      };
+    if (q('#free-restart')) q('#free-restart').onclick = restart;
+    body.querySelectorAll('.cand').forEach((b) => {
+      const r = rows[+b.dataset.k];
+      b.onclick = () => playMove(r.move);
+      const arrow = [{ orig: r.move.from, dest: r.move.to, brush: 'paleBlue', modifiers: { lineWidth: 14 } }];
+      b.addEventListener('pointermove', (e) => e.pointerType === 'mouse' && board.applyShapes(arrow));
+      b.addEventListener('pointerleave', (e) => e.pointerType === 'mouse' && board.applyShapes());
+    });
+    body.querySelectorAll('.ml-move').forEach((b) => {
+      b.onclick = () => {
+        cursor = +b.dataset.ply;
+        showMine = false;
+        render();
+      };
+    });
+    const help = q('#ex-help-btn');
+    if (help)
+      help.onclick = () => {
+        const f = fen();
+        renderExplorerHelp(q('#ex-help'), explorerData.get(f).error, f, side, () => {
+          explorerData.clear();
+          render();
+        });
+      };
+  }
+
+  // Сделать ход в текущей позиции: если он совпадает с ходом из «будущего» — просто идём вперёд.
+  function playMove(m) {
+    const c = new Chess(fen());
+    let mv;
+    try {
+      mv = c.move({ from: m.from, to: m.to, promotion: m.promotion });
+    } catch {
+      return render();
+    }
+    if (moves[cursor] && moves[cursor].san === mv.san) {
+      cursor++;
+    } else {
+      moves.length = cursor;
+      fens.length = cursor + 1;
+      moves.push(mv);
+      fens.push(c.fen());
+      cursor++;
+    }
+    showMine = false;
+    sound(mv.captured ? 'capture' : 'move');
+    render();
+  }
+
+  function onUserMove(m) {
+    playMove(m);
+  }
+
+  // Соперник «как в жизни»: случайный ход, чаще — популярный.
+  function playRandom() {
+    if (!rows.length) return;
+    const weights = rows.map((r) => r.n || 1);
+    let x = Math.random() * weights.reduce((a, b) => a + b, 0);
+    for (let k = 0; k < rows.length; k++) {
+      x -= weights[k];
+      if (x <= 0) return playMove(rows[k].move);
+    }
+    playMove(rows[0].move);
+  }
+
+  function back() {
+    if (cursor === 0) return;
+    cursor--;
+    showMine = false;
+    render();
+  }
+
+  function forward() {
+    if (cursor >= moves.length) return;
+    cursor++;
+    showMine = false;
+    render();
+  }
+
+  // «Заново» не стирает партию сразу: её можно вернуть кнопкой ▶, пока не сыгран другой ход.
+  function restart() {
+    cursor = 0;
+    showMine = false;
+    render();
+  }
+
+  app.querySelector('#side-btn').onclick = () => {
+    side = side === 'w' ? 'b' : 'w';
+    board.myColor = side;
+    board.cg.set({ orientation: colorName(side) });
+    app.querySelector('#side-label').textContent = `Ты играешь ${sideName(side)}`;
+    app.querySelector('#side-btn .lbl-theory').textContent = side === 'w' ? 'За чёрных' : 'За белых';
+    showMine = false;
+    render();
+  };
+
+  const onKey = (e) => {
+    if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;
+    if (document.querySelector('.modal-wrap')) return;
+    if (e.key === 'ArrowRight') forward();
+    if (e.key === 'ArrowLeft') back();
+  };
+  window.addEventListener('keydown', onKey);
+  onCleanup(() => window.removeEventListener('keydown', onKey));
+
+  render();
+}
+
 // ─────────────────────────── профиль ───────────────────────────
 
 function profileView() {
@@ -2008,6 +2479,8 @@ function route() {
       return reviewView();
     case 'quiz':
       return quizView();
+    case 'free':
+      return freeView();
     case 'theory':
       return theoryView();
     case 'profile':
