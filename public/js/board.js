@@ -49,6 +49,19 @@ export function threatArrows(chess, myColor) {
   return out.slice(0, 6);
 }
 
+// Ходы стороны color, даже если сейчас её очередь не наступила.
+export function movesFor(chess, color) {
+  if (chess.turn() === color) return chess.moves({ verbose: true });
+  const parts = chess.fen().split(' ');
+  parts[1] = color;
+  parts[3] = '-';
+  try {
+    return new Chess(parts.join(' ')).moves({ verbose: true });
+  } catch {
+    return [];
+  }
+}
+
 export function toDests(chess) {
   const dests = new Map();
   for (const m of chess.moves({ verbose: true })) {
@@ -58,10 +71,11 @@ export function toDests(chess) {
   return dests;
 }
 
-export function sanToMove(fen, san) {
+// Ход в позиции fen: принимает SAN («Nf3») или объект { from, to, promotion }.
+export function sanToMove(fen, move) {
   const c = new Chess(fen);
   try {
-    return c.move(san.replace(/[!?]+$/, ''));
+    return c.move(typeof move === 'string' ? move.replace(/[!?]+$/, '') : move);
   } catch {
     return null;
   }
@@ -78,9 +92,12 @@ export function moveLabel(ply, san) {
 }
 
 export class Board {
-  constructor(el, { orientation = 'white', onUserMove } = {}) {
+  constructor(el, { orientation = 'white', onUserMove, myColor = orientation === 'white' ? 'w' : 'b' } = {}) {
     this.el = el;
     this.onUserMove = onUserMove;
+    this.myColor = myColor;
+    this.insightOn = false; // показывать все ходы соперника и фигуры под ударом
+    this.focus = null; // фигура соперника, которую нажали, — показываем её ходы
     this.chess = new Chess();
     this.cg = Chessground(el, {
       fen: this.chess.fen(),
@@ -98,7 +115,48 @@ export class Board {
         events: { after: (orig, dest) => this.handleMove(orig, dest) },
       },
       drawable: { enabled: true, visible: true, defaultSnapToValidMove: true },
+      events: { select: (key) => this.onSelect(key) },
     });
+  }
+
+  // Нажатие на фигуру соперника показывает, куда она может пойти и на что нападает.
+  onSelect(key) {
+    const p = this.chess.get(key);
+    const enemy = this.myColor === 'w' ? 'b' : 'w';
+    const focus = p && p.color === enemy && this.focus !== key ? key : null;
+    if (focus === this.focus) return;
+    this.focus = focus;
+    this.renderInsight();
+  }
+
+  setInsight(on) {
+    this.insightOn = on;
+    this.renderInsight();
+  }
+
+  renderInsight() {
+    const map = new Map();
+    const add = (sq, cls) => map.set(sq, map.has(sq) ? `${map.get(sq)} ${cls}` : cls);
+    const enemy = this.myColor === 'w' ? 'b' : 'w';
+    if (this.insightOn || this.focus) {
+      const all = movesFor(this.chess, enemy);
+      const shown = this.focus ? all.filter((m) => m.from === this.focus) : all;
+      const targets = new Set(shown.map((m) => m.to));
+      for (const sq of targets) add(sq, this.focus ? 'opp-move strong' : 'opp-move');
+      if (this.focus) add(this.focus, 'opp-focus');
+      // Наши фигуры под ударом: красное кольцо — без защиты (или бьёт фигура дешевле), оранжевое — защищена.
+      for (const sq of SQUARES) {
+        const p = this.chess.get(sq);
+        if (!p || p.color !== this.myColor) continue;
+        let attackers = this.chess.attackers(sq, enemy);
+        if (this.focus) attackers = attackers.filter((a) => a === this.focus);
+        if (!attackers.length) continue;
+        const defended = this.chess.attackers(sq, this.myColor).length > 0;
+        const cheapest = Math.min(...attackers.map((a) => VALUE[this.chess.get(a).type]));
+        add(sq, !defended || cheapest < VALUE[p.type] ? 'attacked' : 'guarded');
+      }
+    }
+    this.cg.set({ highlight: { custom: map } });
   }
 
   handleMove(orig, dest) {
@@ -127,6 +185,7 @@ export class Board {
   }
 
   sync(lastMove) {
+    this.focus = null;
     this.cg.set({
       fen: this.chess.fen(),
       turnColor: this.chess.turn() === 'w' ? 'white' : 'black',
@@ -134,6 +193,7 @@ export class Board {
       lastMove,
       movable: { color: undefined, dests: new Map() },
     });
+    this.renderInsight();
   }
 
   // Разрешить пользователю ходить за цвет color ('w'/'b').
@@ -153,6 +213,7 @@ export class Board {
   // Вернуть доску в позицию chess.js (после неправильного хода).
   reset(lastMove) {
     this.cg.set({ fen: this.chess.fen(), lastMove, check: this.chess.inCheck() });
+    this.renderInsight();
   }
 
   shapes(list) {

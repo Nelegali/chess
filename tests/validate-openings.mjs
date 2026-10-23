@@ -3,6 +3,7 @@
 // Запуск: node tests/validate-openings.mjs
 import { Chess } from '../public/vendor/chess.js';
 import { OPENINGS } from '../public/js/openings.js';
+import { ALTERNATIVES } from '../public/js/alternatives.js';
 
 const SQ = /^[a-h][1-8]$/;
 const errors = [];
@@ -65,9 +66,33 @@ for (const o of OPENINGS) {
   }
 }
 
+// Ручные пояснения «почему не по-другому»: ход легален и отличается от теории.
+let altCount = 0;
+for (const [lineId, byPly] of Object.entries(ALTERNATIVES)) {
+  const found = OPENINGS.flatMap((o) => o.lines).find((l) => l.id === lineId);
+  if (!found) {
+    errors.push(`alternatives: нет линии ${lineId}`);
+    continue;
+  }
+  for (const [ply, moves] of Object.entries(byPly)) {
+    const c = new Chess();
+    for (const s of found.steps.slice(0, +ply)) c.move(s.m.replace(/[!?]+$/, ''));
+    const main = new Chess(c.fen()).move(found.steps[+ply].m.replace(/[!?]+$/, '')).san;
+    for (const [san, val] of Object.entries(moves)) {
+      altCount++;
+      if (typeof val !== 'string' && !(val && typeof val.t === 'string' && ['blunder', 'mistake', 'dubious', 'ok', 'good'].includes(val.v))) {
+        errors.push(`alternatives ${lineId}[${ply}] ${san}: значение должно быть строкой или { v, t }`);
+      }
+      const legal = c.moves();
+      if (!legal.includes(san)) errors.push(`alternatives ${lineId}[${ply}]: ход ${san} нелегален (есть: ${legal.join(' ')})`);
+      if (san === main) errors.push(`alternatives ${lineId}[${ply}]: ${san} совпадает с ходом по теории`);
+    }
+  }
+}
+
 if (errors.length) {
   console.error(errors.join('\n'));
   console.error(`\n✗ ошибок: ${errors.length}`);
   process.exit(1);
 }
-console.log(`✓ ${OPENINGS.length} дебютов, ${lines} линий, ${moves} ходов — всё легально`);
+console.log(`✓ ${OPENINGS.length} дебютов, ${lines} линий, ${moves} ходов, ${altCount} ручных пояснений — всё легально`);

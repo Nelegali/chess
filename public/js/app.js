@@ -4,7 +4,8 @@ import { Board, Chess, parseArrows, threatArrows, sanToMove, moveLabel, figurine
 import { Chessground } from '../vendor/chessground.js';
 import { play as sound } from './sound.js';
 import * as lichess from './lichess.js';
-import { BASICS, GLOSSARY, GLOSSARY_BY_ID, OPENING_THEORY, linkTerms } from './theory.js';
+import { BASICS, GLOSSARY, GLOSSARY_BY_ID, OPENING_THEORY, DIAGRAMS, linkTerms } from './theory.js';
+import * as coach from './coach.js';
 
 const app = document.getElementById('app');
 const topbar = document.getElementById('topbar');
@@ -17,8 +18,30 @@ const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 const clean = (san) => san.replace(/[!?]+$/, '');
+// Ходы в тексте вида «Nf3», «...Qxg5», «Bxc6» показываем значками фигур: ♘f3, …♕xg5, ♗xc6.
+const FIG_TEXT = { K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘' };
+const figText = (s) =>
+  s
+    .replace(/\.\.\./g, '…')
+    .replace(/(^|[^A-Za-zА-Яа-яЁё])([KQRBN])([a-h]?[1-8]?x?[a-h][1-8])/g, (m, pre, p, rest) => pre + FIG_TEXT[p] + rest);
+
 // Экранированный текст, где термины из словаря — нажимаемые кнопки.
-const rich = (s) => linkTerms(esc(s));
+const rich = (s) => linkTerms(figText(esc(s)));
+
+// Пометки к ходам (!, ?, ?!) словами — новичку значки ничего не говорят.
+const ANN = { '??': 'грубая ошибка', '?': 'ошибка', '?!': 'сомнительный ход', '!?': 'интересный ход', '!': 'сильный ход', '!!': 'блестящий ход' };
+const annOf = (san) => (san.match(/[!?]+$/) || [''])[0];
+function annBadge(san) {
+  const a = annOf(san);
+  return a ? `<span class="ann ${a.includes('?') ? 'bad' : 'good'}">${ANN[a]}</span>` : '';
+}
+const verdictBadge = (v) => `<span class="wn-badge v-${v}">${coach.VERDICTS[v]}</span>`;
+
+// Раскрыт ли блок «Почему не по-другому?» — запоминаем выбор.
+let whyOpen = true;
+try {
+  whyOpen = localStorage.getItem('why-open') !== '0';
+} catch {}
 const sideName = (c) => (c === 'w' ? 'белыми' : 'чёрными');
 const colorName = (c) => (c === 'w' ? 'white' : 'black');
 const DIFF = { 1: 'Легко', 2: 'Средне', 3: 'Сложно' };
@@ -71,15 +94,15 @@ function buildLine(steps, startFen) {
 
 const turnAt = (fen) => fen.split(' ')[1];
 
-function miniBoard(el, fen, orientation, lastMove) {
+function miniBoard(el, fen, orientation, lastMove, shapes = [], coordinates = false) {
   const cg = Chessground(el, {
     fen,
     orientation,
     viewOnly: true,
-    coordinates: false,
+    coordinates,
     lastMove,
     animation: { enabled: false },
-    drawable: { enabled: false, visible: true },
+    drawable: { enabled: false, visible: true, autoShapes: shapes },
   });
   onCleanup(() => cg.destroy());
   return cg;
@@ -410,6 +433,7 @@ function openingView(id) {
       </div>
     </section>`;
   miniBoard(app.querySelector('#hero'), fen, colorName(o.side), lastMove);
+  mountDiagrams(app);
 }
 
 // ─────────────────────────── изучение ───────────────────────────
@@ -419,6 +443,15 @@ function playLayout(opening, line, mode) {
     <div class="play">
       <div class="board-col">
         <div class="board" id="board"></div>
+        <div class="board-tools">
+          <button type="button" class="btn tiny insight-btn" id="insight-btn" aria-pressed="false">👁 Куда может пойти соперник</button>
+        </div>
+        <p class="insight-legend" id="insight-legend" hidden>
+          <span><i class="ins dot"></i>сюда может пойти соперник</span>
+          <span><i class="ins ring"></i>твоя фигура под ударом</span>
+          <span><i class="ins ring guarded"></i>под ударом, но защищена</span>
+          <span class="muted">Нажми на фигуру соперника — покажу только её ходы.</span>
+        </p>
         <div class="legend">
           <span><i class="lg g"></i>идея</span>
           <span><i class="lg r"></i>угроза</span>
@@ -439,6 +472,24 @@ function playLayout(opening, line, mode) {
         <div id="panel-body"></div>
       </div>
     </div>`;
+}
+
+// Кнопка «Куда может пойти соперник»: включённое состояние запоминается.
+function setupInsight(board) {
+  const btn = app.querySelector('#insight-btn');
+  const legend = app.querySelector('#insight-legend');
+  const apply = (on) => {
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.classList.toggle('on', on);
+    legend.hidden = !on;
+    board.setInsight(on);
+  };
+  btn.onclick = () => {
+    const on = !store.settings.insight;
+    store.saveSettings({ insight: on });
+    apply(on);
+  };
+  apply(!!store.settings.insight);
 }
 
 function renderDots(el, total, ply, side, fens) {
@@ -462,13 +513,15 @@ function learnView(lineId) {
 
   const body = app.querySelector('#panel-body');
   const dots = app.querySelector('#dots');
-  const board = new Board(app.querySelector('#board'), { orientation: colorName(side), onUserMove });
+  const board = new Board(app.querySelector('#board'), { orientation: colorName(side), myColor: side, onUserMove });
   onCleanup(() => board.destroy());
+  setupInsight(board);
 
   let ply = 0;
   let alt = null; // { def, fens, moves, ply, base }
   let explorerOpen = false;
   let wrongMsg = '';
+  let lastWrong = null;
 
   function currentFen() {
     return alt ? alt.fens[alt.ply] : fens[ply];
@@ -504,7 +557,7 @@ function learnView(lineId) {
 
     const mover = ply > 0 ? turnAt(fens[ply - 1]) : null;
     const head = step
-      ? `<div class="move-head"><span class="san">${moveLabel(ply - 1, step.m)}</span><span class="who ${mover === side ? 'me' : 'opp'}">${mover === side ? 'твой ход' : 'ход соперника'}</span></div>`
+      ? `<div class="move-head"><span class="san">${moveLabel(ply - 1, clean(step.m))}</span><span class="who ${mover === side ? 'me' : 'opp'}">${mover === side ? 'твой ход' : 'ход соперника'}</span>${annBadge(step.m)}</div>`
       : `<div class="move-head"><span class="san">Начало</span><span class="who me">ты играешь ${sideName(side)}</span></div>`;
     const text = step
       ? `<p class="explain">${rich(step.t)}</p>`
@@ -516,23 +569,39 @@ function learnView(lineId) {
       prompt = `<div class="prompt done">🏁 Вариант пройден до конца! Нажми «Завершить», чтобы получить XP.</div>`;
       mainBtn = '<button class="btn primary" id="finish">🏁 Завершить</button>';
     } else if (myTurn) {
-      prompt = `<div class="prompt mine">Твой ход: <b>${figurine(clean(line.steps[ply].m))}</b> ${store.settings.hints ? '— сыграй его на доске по зелёной стрелке' : '— сыграй его на доске'}</div>
-        ${wrongMsg ? `<div class="wrong-msg">${wrongMsg}</div>` : ''}`;
+      const nextStep = line.steps[ply];
+      prompt = `<div class="prompt mine">
+          <div>Твой ход: <b>${figurine(clean(nextStep.m))}</b> ${store.settings.hints ? '— сыграй его на доске по зелёной стрелке' : '— сыграй его на доске'}</div>
+          <div class="why"><span class="why-label">Зачем этот ход</span>${rich(nextStep.t)}</div>
+        </div>
+        ${wrongMsg ? `<div class="wrong-msg">${wrongMsg}</div>` : ''}
+        ${whyNotBlock()}`;
       mainBtn = '<button class="btn" id="auto">💡 Сделать ход за меня</button>';
     } else {
       mainBtn = '<button class="btn primary" id="opp">Ход соперника ▶</button>';
     }
 
+    // Варианты «а что если» к только что показанному ходу: явно пишем, чей это ход и вместо чего.
     const alts = step && step.alt
-      ? `<div class="alts"><div class="alts-title">🤔 А что если…</div>${step.alt
-          .map((a, i) => `<button class="btn alt" data-alt="${i}">${esc(a.label)}</button>`)
-          .join('')}</div>`
+      ? `<div class="alts">
+          <div class="alts-title">🤔 А если бы ${mover === side ? 'ты сыграл' : 'соперник сыграл'} иначе?</div>
+          ${step.alt
+            .map(
+              (a, i) => `<button type="button" class="alt-card" data-alt="${i}">
+                <span class="alt-move">Вместо ${moveLabel(ply - 1, clean(step.m))} → <b>${moveLabel(ply - 1, clean(a.steps[0].m))}</b> ${annBadge(a.steps[0].m)}</span>
+                <span class="alt-name">${esc(a.label)}</span>
+                ${a.intro ? `<span class="alt-intro">${rich(a.intro)}</span>` : ''}
+                <span class="alt-cta">▶ Разыграть на доске</span>
+              </button>`,
+            )
+            .join('')}
+        </div>`
       : '';
 
     body.innerHTML = `
       <div class="move-card">${head}${text}</div>
-      ${prompt}
       ${alts}
+      ${prompt}
       ${explorerBlock()}
       <div class="actionbar">
         <button class="btn nav" id="prev" ${ply === 0 ? 'disabled' : ''} aria-label="Назад">◀</button>
@@ -544,12 +613,59 @@ function learnView(lineId) {
     body.querySelectorAll('[data-alt]').forEach((b) =>
       b.addEventListener('click', () => startAlt(step.alt[+b.dataset.alt])),
     );
+    const wn = body.querySelector('.whynot');
+    if (wn) {
+      wn.addEventListener('toggle', () => {
+        whyOpen = wn.open;
+        try {
+          localStorage.setItem('why-open', whyOpen ? '1' : '0');
+        } catch {}
+      });
+      const list = whyNotList();
+      body.querySelectorAll('[data-wn]').forEach((b) =>
+        b.addEventListener('click', () => startDemo(list[+b.dataset.wn])),
+      );
+    }
+    const wd = body.querySelector('#wrong-demo');
+    if (wd) wd.onclick = () => startDemo(lastWrong);
     const fin = body.querySelector('#finish');
     if (fin) fin.onclick = finish;
     const opp = body.querySelector('#opp');
     if (opp) opp.onclick = forward;
     const auto = body.querySelector('#auto');
     if (auto) auto.onclick = forward;
+  }
+
+  // Альтернативы к ходу ученика (кэшируем: считать каждый раз дорого).
+  const whyNotCache = new Map();
+  function whyNotList() {
+    if (!whyNotCache.has(ply)) {
+      whyNotCache.set(ply, coach.alternatives(fens[ply], moves[ply], { lineId: line.id, ply, stepAlt: line.steps[ply].alt || [] }));
+    }
+    return whyNotCache.get(ply);
+  }
+
+  function whyNotBlock() {
+    const list = whyNotList();
+    if (!list.length) return '';
+    return `<details class="whynot" ${whyOpen ? 'open' : ''}>
+      <summary>🤔 Почему не по-другому?</summary>
+      <div class="wn-list">${list
+        .map(
+          (c, i) => `<div class="wn-item v-${c.verdict}">
+            <div class="wn-head"><b class="wn-san">${moveLabel(ply, c.san)}</b>${verdictBadge(c.verdict)}</div>
+            ${c.demoLabel ? `<div class="wn-label">${esc(c.demoLabel)}</div>` : ''}
+            <p>${rich(c.text)}</p>
+            ${c.demo ? `<button type="button" class="btn tiny" data-wn="${i}">▶ Показать на доске</button>` : ''}
+          </div>`,
+        )
+        .join('')}</div>
+    </details>`;
+  }
+
+  function startDemo(c) {
+    if (!c || !c.demo) return;
+    startAlt({ label: c.demoLabel || `Почему не ${figurine(c.san)}?`, intro: c.text, steps: c.demo }, ply);
   }
 
   function explorerBlock() {
@@ -642,14 +758,20 @@ function learnView(lineId) {
     } else {
       sound('wrong');
       board.shake();
-      const tried = sanToMove(fens[ply], m) || { san: m.from + '-' + m.to };
-      wrongMsg = `${figurine(tried.san)} — тоже ход, но в этом дебюте здесь играют <b>${figurine(expected.san)}</b>. Смотри на зелёную стрелку.`;
+      const tried = sanToMove(fens[ply], m);
+      if (!tried) return render();
+      lastWrong = coach.explain(fens[ply], tried, expected, { lineId: line.id, ply });
+      wrongMsg = `<div class="wn-head"><b>${moveLabel(ply, tried.san)}</b>${verdictBadge(lastWrong.verdict)}</div>
+        <p>${rich(lastWrong.text)}</p>
+        ${lastWrong.demo ? '<button type="button" class="btn tiny" id="wrong-demo">▶ Показать, к чему это приведёт</button>' : ''}
+        <p class="muted small">Ход по теории: <b>${figurine(expected.san)}</b> — сыграй его по зелёной стрелке.</p>`;
       render();
     }
   }
 
-  function startAlt(def) {
-    const base = ply - 1; // вариант заменяет текущий показанный ход
+  // base — с какой позиции начинается вариант: по умолчанию он заменяет показанный ход,
+  // а для «почему не по-другому» — ход, который ученику предстоит сделать.
+  function startAlt(def, base = ply - 1) {
     const built = buildLine(def.steps, fens[base]);
     alt = { def, base, ply: 0, ...built };
     render();
@@ -667,7 +789,7 @@ function learnView(lineId) {
         <div class="alt-label">🤔 ${esc(def.label)}</div>
         ${
           step
-            ? `<div class="move-head"><span class="san">${moveLabel(alt.base + alt.ply - 1, step.m)}</span></div><p class="explain">${rich(step.t)}</p>`
+            ? `<div class="move-head"><span class="san">${moveLabel(alt.base + alt.ply - 1, clean(step.m))}</span>${annBadge(step.m)}</div><p class="explain">${rich(step.t)}</p>`
             : `<p class="explain">${rich(def.intro || 'Посмотрим, что будет.')}</p>`
         }
       </div>
@@ -771,14 +893,16 @@ function drillView(lineId, queue) {
   app.innerHTML = playLayout(opening, line, 'drill');
   const body = app.querySelector('#panel-body');
   const dots = app.querySelector('#dots');
-  const board = new Board(app.querySelector('#board'), { orientation: colorName(side), onUserMove });
+  const board = new Board(app.querySelector('#board'), { orientation: colorName(side), myColor: side, onUserMove });
   onCleanup(() => board.destroy());
+  setupInsight(board);
 
   let ply = 0;
   let mistakes = 0;
   let hints = 0;
   let stepErrors = 0;
   let lastNote = '';
+  let drillWhy = null;
   let timer = null;
   let finished = false;
   onCleanup(() => clearTimeout(timer));
@@ -818,7 +942,13 @@ function drillView(lineId, queue) {
       <div class="prompt ${myTurn ? 'mine' : ''}">
         ${!next ? '🏁 Готово!' : myTurn ? `Твой ход ${sideName(side)}. Вспомни, что здесь играют!` : 'Соперник думает…'}
       </div>
-      ${hint ? `<div class="wrong-msg">${hint}</div>` : ''}
+      ${
+        myTurn && drillWhy
+          ? `<div class="wrong-msg"><div class="wn-head"><b>${moveLabel(ply, drillWhy.san)}</b>${verdictBadge(drillWhy.verdict)}</div><p>${rich(drillWhy.text)}</p>${hint ? `<p>${hint}</p>` : ''}</div>`
+          : hint
+            ? `<div class="wrong-msg">${hint}</div>`
+            : ''
+      }
       ${lastNote && store.settings.drillText ? `<div class="move-card small">${lastNote}</div>` : ''}
       <div class="actionbar">
         <button class="btn" id="restart">↺ Заново</button>
@@ -837,6 +967,7 @@ function drillView(lineId, queue) {
       hints = 0;
       stepErrors = 0;
       lastNote = '';
+      drillWhy = null;
       step0();
     };
     if (myTurn) board.enable(side);
@@ -870,12 +1001,15 @@ function drillView(lineId, queue) {
       lastNote = noteFor(ply);
       ply++;
       stepErrors = 0;
+      drillWhy = null;
       step0();
     } else {
       sound('wrong');
       board.shake();
       if (stepErrors < 2) mistakes++;
       stepErrors++;
+      const tried = sanToMove(fens[ply], m);
+      drillWhy = tried ? { san: tried.san, ...coach.explain(fens[ply], tried, expected, { lineId: line.id, ply, reveal: false }) } : null;
       render();
     }
   }
@@ -1224,7 +1358,14 @@ function profileView() {
     <div class="card">
       <h2>Lichess</h2>
       <p class="muted">С 2026 года Lichess показывает статистику дебютов только вошедшим пользователям. Чтобы видеть её в приложении, <a href="${lichess.TOKEN_CREATE_URL}" target="_blank" rel="noopener">создай токен на Lichess</a> (без галочек) и вставь сюда. На своём сервере вместо этого можно задать LICHESS_TOKEN.</p>
-      <input class="input" id="li-token" type="password" placeholder="lip_…" value="${esc(s.lichessToken)}" autocomplete="off">
+      <div class="row">
+        <input class="input" id="li-token" type="password" placeholder="lip_…" value="${esc(s.lichessToken)}" autocomplete="off">
+      </div>
+      <div class="row token-actions">
+        <button type="button" class="btn primary" id="li-save">Сохранить</button>
+        <button type="button" class="btn" id="li-check">Проверить</button>
+      </div>
+      <p class="muted small" id="li-status">${s.lichessToken ? 'Токен сохранён на этом устройстве.' : 'Токен не задан.'}</p>
     </div>
     <div class="card">
       <h2>Резервная копия</h2>
@@ -1239,10 +1380,33 @@ function profileView() {
   app.querySelectorAll('[data-set]').forEach((el) =>
     el.addEventListener('change', () => store.saveSettings({ [el.dataset.set]: el.checked })),
   );
-  app.querySelector('#li-token').addEventListener('change', (e) => {
-    store.saveSettings({ lichessToken: e.target.value.trim() });
+  const liStatus = app.querySelector('#li-status');
+  const saveToken = () => {
+    const token = app.querySelector('#li-token').value.trim();
+    store.saveSettings({ lichessToken: token });
     lichess.resetExplorer();
-  });
+    liStatus.textContent = token ? 'Токен сохранён на этом устройстве.' : 'Токен удалён.';
+  };
+  app.querySelector('#li-save').onclick = () => {
+    saveToken();
+    toast('✅ Сохранено');
+  };
+  app.querySelector('#li-check').onclick = async () => {
+    saveToken();
+    liStatus.textContent = 'Проверяю…';
+    try {
+      const data = await lichess.explorer(['e2e4']);
+      const total = data.white + data.draws + data.black;
+      liStatus.textContent = `✅ Работает: Lichess отдал статистику (${total.toLocaleString('ru-RU')} партий после 1.e4).`;
+    } catch (e) {
+      liStatus.textContent =
+        e.kind === 'auth'
+          ? '❌ Lichess не принял токен. Проверь, что он скопирован целиком.'
+          : e.kind === 'network'
+            ? '❌ Запрос не прошёл: похоже, Lichess не пускает такие запросы прямо из браузера. Статистика заработает на твоём сервере.'
+            : `❌ ${e.message}`;
+    }
+  };
   app.querySelector('#export').onclick = () => {
     const blob = new Blob([store.exportProgress()], { type: 'application/json' });
     const a = document.createElement('a');
@@ -1320,6 +1484,29 @@ function accordion(items, openFirst = false) {
     .join('')}</div>`;
 }
 
+// Мини-доска со стрелками к разделу теории (рисуется после вставки HTML — mountDiagrams).
+function diagramHtml(o, kind) {
+  const spec = DIAGRAMS[o.id]?.[kind];
+  if (!spec) return '';
+  return `<figure class="diagram">
+    <div class="diagram-board" data-diagram="${o.id}|${kind}"></div>
+    <figcaption>${rich(spec.caption)}</figcaption>
+  </figure>`;
+}
+
+function mountDiagrams(root) {
+  root.querySelectorAll('[data-diagram]:not([data-mounted])').forEach((el) => {
+    const [id, kind] = el.dataset.diagram.split('|');
+    const o = OPENINGS.find((x) => x.id === id);
+    const spec = DIAGRAMS[id][kind];
+    const line = o.lines[spec.line || 0];
+    const { fens, moves } = buildLine(line.steps.slice(0, spec.ply));
+    const last = moves[moves.length - 1];
+    miniBoard(el, fens[fens.length - 1], colorName(lineSide(o, line)), last ? [last.from, last.to] : undefined, parseArrows(spec.a), true);
+    el.dataset.mounted = '1';
+  });
+}
+
 function openingTheoryHtml(o, openFirst = true) {
   const th = OPENING_THEORY[o.id];
   if (!th) return '';
@@ -1328,8 +1515,8 @@ function openingTheoryHtml(o, openFirst = true) {
   return accordion(
     [
       ['🏷️', `Что значит «${o.name}»`, `<p>${rich(th.name)}</p>`],
-      ['💡', 'В чём суть', `<p>${rich(th.essence)}</p>`],
-      ['🎯', trap ? 'Что нужно запомнить' : `Твои планы (играешь ${sideName(o.side)})`, list(th.plans)],
+      ['💡', 'В чём суть', `<p>${rich(th.essence)}</p>${diagramHtml(o, 'essence')}`],
+      ['🎯', trap ? 'Что нужно запомнить' : `Твои планы (играешь ${sideName(o.side)})`, list(th.plans) + diagramHtml(o, 'plans')],
       ['⚠️', 'Чего ждать от соперника', list(th.opponent)],
       ['❌', 'Частые ошибки', list(th.mistakes)],
       ['⭐', 'Интересный факт', `<p>${rich(th.famous)}</p>`],
@@ -1339,13 +1526,14 @@ function openingTheoryHtml(o, openFirst = true) {
 }
 
 function showTheory(opening) {
-  modal(`
+  const { el } = modal(`
     <div class="theory-modal">
       <h2>📚 ${esc(opening.name)}</h2>
       ${opening.aka ? `<p class="muted">${esc(opening.aka)} · ECO ${esc(opening.eco)}</p>` : `<p class="muted">ECO ${esc(opening.eco)}</p>`}
       ${openingTheoryHtml(opening)}
       <button class="btn primary big" data-close>Понятно, к доске</button>
     </div>`);
+  mountDiagrams(el);
 }
 
 function showTerm(id) {
@@ -1471,10 +1659,26 @@ route();
 store.pull();
 
 // Офлайн-режим. В некоторых встроенных окнах service worker запрещён — тогда просто работаем без него.
+// Когда на сайте появилась новая версия, новый service worker берёт управление —
+// перезагружаем страницу, чтобы сразу показать свежую версию.
 try {
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController) return;
+      try {
+        sessionStorage.setItem('app-updated', '1');
+      } catch {}
+      location.reload();
+    });
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 } catch {
   /* нет доступа к service worker */
 }
+try {
+  if (sessionStorage.getItem('app-updated')) {
+    sessionStorage.removeItem('app-updated');
+    setTimeout(() => toast('✨ Приложение обновлено'), 500);
+  }
+} catch {}

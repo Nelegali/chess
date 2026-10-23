@@ -355,15 +355,6 @@ body[data-view='drill'] .app {
 .btn.danger {
   color: var(--red);
 }
-.btn.alt {
-  width: 100%;
-  justify-content: flex-start;
-  text-align: left;
-  border-style: dashed;
-  border-color: var(--purple);
-  background: color-mix(in srgb, var(--purple) 10%, var(--surface));
-}
-
 /* ───── главная ───── */
 
 .today-row {
@@ -1600,4 +1591,245 @@ cg-board square.check {
   background: var(--surface-2);
   padding: 1px 5px;
   border-radius: 4px;
+}
+
+/* ───── «зачем» и «почему не по-другому» ───── */
+
+.why {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  font-size: 0.95rem;
+}
+.why-label {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  margin-bottom: 2px;
+}
+.whynot {
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.whynot summary {
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.whynot summary::-webkit-details-marker {
+  display: none;
+}
+.whynot summary::after {
+  content: '';
+  margin-left: auto;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg);
+  transition: transform 0.2s;
+}
+.whynot[open] summary::after {
+  transform: rotate(-135deg);
+}
+.wn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 10px;
+}
+.wn-item {
+  --v: var(--muted);
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border-left: 4px solid var(--v);
+}
+.wn-item p,
+.wrong-msg p {
+  margin: 4px 0 6px;
+  font-size: 0.93rem;
+}
+.wn-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.wn-san {
+  font-size: 1.05rem;
+}
+.wn-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-top: 2px;
+}
+.wn-badge {
+  --v: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: var(--v);
+  background: color-mix(in srgb, var(--v) 18%, transparent);
+}
+.v-blunder {
+  --v: var(--red);
+}
+.v-mistake {
+  --v: #e8833a;
+}
+.v-dubious {
+  --v: var(--gold);
+}
+.v-ok {
+  --v: var(--muted);
+}
+.v-good {
+  --v: var(--accent);
+}
+.ann {
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.ann.bad {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 16%, transparent);
+}
+.ann.good {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* ───── карточки «а если бы…» ───── */
+
+.alt-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px dashed var(--purple);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--purple) 9%, var(--surface));
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.alt-card:hover {
+  background: color-mix(in srgb, var(--purple) 16%, var(--surface));
+}
+.alt-move {
+  font-size: 0.95rem;
+}
+.alt-name {
+  font-weight: 700;
+}
+.alt-intro {
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+.alt-cta {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--purple);
+}
+
+/* ───── «куда может пойти соперник» ───── */
+
+.board-tools {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+.insight-btn.on {
+  background: color-mix(in srgb, var(--red) 22%, var(--surface));
+  border-color: var(--red);
+}
+.insight-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 12px;
+  margin: 6px 0 0;
+  padding: 0 12px;
+  font-size: 0.75rem;
+}
+.insight-legend[hidden] {
+  display: none;
+}
+.ins {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 4px;
+  vertical-align: -2px;
+  border-radius: 50%;
+}
+.ins.dot {
+  background: radial-gradient(#d23c3c 45%, transparent 50%);
+}
+.ins.ring {
+  border-radius: 2px;
+  background: rgba(220, 40, 40, 0.18);
+  box-shadow: inset 0 0 0 3px #d23c3c;
+}
+.ins.ring.guarded {
+  background: none;
+  box-shadow: inset 0 0 0 2px #e18c1e;
+}
+cg-board square.opp-move {
+  background: radial-gradient(rgba(210, 50, 50, 0.45) 16%, transparent 18%);
+}
+cg-board square.opp-move.strong {
+  background: radial-gradient(rgba(210, 40, 40, 0.75) 20%, transparent 22%);
+}
+cg-board square.opp-focus {
+  background-color: rgba(210, 50, 50, 0.3);
+}
+/* Фигуры под ударом — квадратная рамка, чтобы не путать с круглыми «важными полями» из объяснений */
+cg-board square.attacked {
+  background-color: rgba(220, 40, 40, 0.18);
+  box-shadow: inset 0 0 0 4px rgba(220, 40, 40, 0.9);
+}
+cg-board square.guarded {
+  box-shadow: inset 0 0 0 3px rgba(225, 140, 30, 0.9);
+}
+
+/* ───── схемы в теории ───── */
+
+.diagram {
+  margin: 10px 0 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.diagram-board {
+  width: min(100%, 300px);
+  aspect-ratio: 1;
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+.diagram figcaption {
+  max-width: 300px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  text-align: center;
+}
+.token-actions {
+  margin-top: 8px;
 }

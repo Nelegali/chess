@@ -1,6 +1,6 @@
 // Офлайн-режим: файлы приложения кэшируются, обновления подтягиваются в фоне.
 // При изменении файлов увеличь VERSION, чтобы телефоны быстрее получили новую версию.
-const VERSION = 'v3';
+const VERSION = 'v5';
 const CACHE = `chess-openings-${VERSION}`;
 const SHELL = [
   './',
@@ -14,6 +14,8 @@ const SHELL = [
   'js/sound.js',
   'js/lichess.js',
   'js/theory.js',
+  'js/coach.js',
+  'js/alternatives.js',
   'vendor/chess.js',
   'vendor/chessground.js',
   'vendor/chessground.base.css',
@@ -25,7 +27,13 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' — берём файлы с сервера, а не из HTTP-кэша браузера, иначе можно закэшировать старую версию.
+  e.waitUntil(
+    caches
+      .open(CACHE)
+      .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener('activate', (e) => {
