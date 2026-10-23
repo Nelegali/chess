@@ -1405,15 +1405,38 @@ cg-board square.check {
   .dots {
     margin: 6px 0 10px;
   }
-  /* Размер доски на телефоне: под ней должно оставаться ~230px — строка кнопок и объяснение хода
-     целиком (у 9 из 10 ходов оно не выше 172px). Но не меньше 260px, чтобы было удобно ходить. */
+  /* Размер доски на телефоне: под ней должно оставаться ~280px — строка кнопок, объяснение хода
+     и начало подсказки «Твой ход». Вычитаем и вырезы экрана (когда приложение установлено
+     на экран «Домой»). Но не меньше 230px, чтобы по клеткам можно было попасть пальцем. */
   :root {
-    --phone-board: min(100vw, max(260px, calc(100vh - 350px)));
+    --phone-board: min(100vw, max(230px, calc(100vh - 400px - var(--safe-top) - var(--safe-bottom))));
   }
   @supports (height: 100svh) {
     :root {
-      --phone-board: min(100vw, max(260px, calc(100svh - 350px)));
+      --phone-board: min(100vw, max(230px, calc(100svh - 400px - var(--safe-top) - var(--safe-bottom))));
     }
+  }
+  /* текст под доской чуть плотнее, чтобы больше помещалось без прокрутки */
+  .explain {
+    font-size: 0.95rem;
+  }
+  .move-card > :last-child {
+    margin-bottom: 0;
+  }
+  .move-card {
+    padding: 11px 12px;
+    margin-bottom: 10px;
+  }
+  .move-head {
+    margin-bottom: 4px;
+  }
+  .san {
+    font-size: 1.2rem;
+  }
+  .prompt {
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    font-size: 0.95rem;
   }
   .board {
     max-width: min(100%, var(--phone-board));
@@ -2093,7 +2116,7 @@ body[data-view='drill'] .update-bar {
     grid-area: dots;
     align-self: center;
     gap: 3px;
-    margin: 8px 0;
+    margin: 6px 0;
   }
   .play.lesson .dots i {
     width: 10px;
