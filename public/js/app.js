@@ -2182,9 +2182,14 @@ function freeView() {
             // зачем этот ход: из урока, а если его нет в базе — короткая идея от тренера
             const idea = (r.book && r.book.text) || coach.moveIdea(fen(), r.move);
             const ideaHtml = idea ? `<span class="c-idea">${richInButton(idea)}</span>` : '';
-            return `<button type="button" class="cand ${r.book ? 'book' : ''}" data-k="${k}">
+            const isPicked = pickedUci && uciOf(r.move) === pickedUci;
+            return `<button type="button" class="cand ${r.book ? 'book' : ''} ${isPicked ? 'picked' : ''}" data-k="${k}" aria-pressed="${!!isPicked}">
                 <span class="c-san">${figurine(r.san)}</span><span class="c-pct">${pct}</span><span class="c-bar">${bar}</span>${note}${ideaHtml}
-              </button>`;
+              </button>${
+                isPicked
+                  ? `<div class="cand-pick">👆 На доске — позиция после ${figurine(r.san)}. Нажми ход ещё раз или «▶ Сыграть» внизу. <button type="button" class="link-btn" id="pick-cancel">✕ Отмена</button></div>`
+                  : ''
+              }`;
           })
           .join('')
       : `<p class="muted">${ex === 'loading' ? '' : 'Ни в нашей базе, ни в статистике нет ходов для этой позиции.'} Сделай ход за ${mine ? 'себя' : 'соперника'} на доске сам.</p>`;
@@ -2227,6 +2232,8 @@ function freeView() {
   }
 
   let rows = [];
+  // Ход из списка, показанный на доске (касание на телефоне): второе касание или кнопка внизу — сыграть.
+  let pickedUci = null;
   // Страницы под доской: 0 — разбор хода, 1 — ответ соперника / что играть, 2 — партия.
   // На телефоне они листаются свайпом, на компьютере идут одна под другой.
   let page = 0;
@@ -2270,6 +2277,9 @@ function freeView() {
 
     let mainBtn;
     if (over) mainBtn = '<button class="btn primary" id="free-new">⟲ Новая партия</button>';
+    const picked = pickedUci ? rows.find((r) => uciOf(r.move) === pickedUci) : null;
+    if (!picked) pickedUci = null;
+    if (picked) mainBtn = `<button class="btn primary" id="free-play-picked">▶ Сыграть ${figurine(picked.san)}</button>`;
     else if (!myTurn) mainBtn = `<button class="btn primary" id="free-random" ${rows.length ? '' : 'disabled'}>🎲 Ответ соперника</button>`;
     else mainBtn = `<button class="btn" id="free-hint">💡 ${page === 1 ? 'Скрыть подсказку' : 'Что здесь играют?'}</button>`;
 
@@ -2300,7 +2310,23 @@ function freeView() {
       </div>`;
     bind();
     showPage(page, false);
+    if (picked) showPicked(picked);
     save();
+  }
+
+  // Позиция после выбранного хода — на доске, ход подсвечен стрелкой.
+  function showPicked(r) {
+    const c = new Chess(fen());
+    try {
+      c.move({ from: r.move.from, to: r.move.to, promotion: r.move.promotion });
+    } catch {
+      return;
+    }
+    board.preview({
+      fen: c.fen(),
+      lastMove: [r.move.from, r.move.to],
+      shapes: [{ orig: r.move.from, dest: r.move.to, brush: 'paleBlue', modifiers: { lineWidth: 12 } }],
+    });
   }
 
   // Строка «твой ход — оценка — популярность» над ответами соперника; нажатие открывает разбор.
@@ -2368,6 +2394,16 @@ function freeView() {
         render();
       };
     if (q('#free-restart')) q('#free-restart').onclick = restart;
+    if (q('#free-play-picked'))
+      q('#free-play-picked').onclick = () => {
+        const r = rows.find((x) => uciOf(x.move) === pickedUci);
+        if (r) playMove(r.move);
+      };
+    if (q('#pick-cancel'))
+      q('#pick-cancel').onclick = () => {
+        pickedUci = null;
+        render();
+      };
     body.querySelectorAll('.pager-tab, .last-sum').forEach((t) => {
       t.onclick = () => {
         const k = +t.dataset.go;
@@ -2406,7 +2442,14 @@ function freeView() {
     });
     body.querySelectorAll('.cand').forEach((b) => {
       const r = rows[+b.dataset.k];
-      b.onclick = () => playMove(r.move);
+      let pointer = '';
+      b.addEventListener('pointerdown', (e) => (pointer = e.pointerType));
+      b.onclick = () => {
+        // мышью — сразу ход (наведение и так показывает его); пальцем — сначала показать на доске
+        if (pointer === 'mouse' || pickedUci === uciOf(r.move)) return playMove(r.move);
+        pickedUci = uciOf(r.move);
+        render();
+      };
       const arrow = [{ orig: r.move.from, dest: r.move.to, brush: 'paleBlue', modifiers: { lineWidth: 14 } }];
       b.addEventListener('pointermove', (e) => e.pointerType === 'mouse' && board.applyShapes(arrow));
       b.addEventListener('pointerleave', (e) => e.pointerType === 'mouse' && board.applyShapes());
@@ -2434,6 +2477,7 @@ function freeView() {
 
   // Сделать ход в текущей позиции: если он совпадает с ходом из «будущего» — просто идём вперёд.
   function playMove(m) {
+    pickedUci = null;
     const c = new Chess(fen());
     let mv;
     try {
@@ -2480,6 +2524,7 @@ function freeView() {
   }
 
   function back() {
+    pickedUci = null;
     if (cursor === 0) return;
     cursor--;
     page = 0;
@@ -2487,6 +2532,7 @@ function freeView() {
   }
 
   function forward() {
+    pickedUci = null;
     if (cursor >= moves.length) return;
     cursor++;
     page = 0;
@@ -2495,6 +2541,7 @@ function freeView() {
 
   // «Заново» не стирает партию сразу: её можно вернуть кнопкой ▶, пока не сыгран другой ход.
   function restart() {
+    pickedUci = null;
     cursor = 0;
     page = 0;
     render();
@@ -2507,6 +2554,7 @@ function freeView() {
     app.querySelector('#side-label').textContent = `Ты играешь ${sideName(side)}`;
     app.querySelector('#side-btn .lbl-theory').textContent = side === 'w' ? 'За чёрных' : 'За белых';
     page = 0;
+    pickedUci = null;
     render();
   };
 

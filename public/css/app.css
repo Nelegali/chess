@@ -2212,6 +2212,18 @@ body[data-view='drill'] .update-bar {
   border-color: var(--purple);
   outline: none;
 }
+.cand.picked {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--blue) 45%, transparent);
+}
+.cand-pick {
+  margin: -2px 0 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
 .cand.book {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
