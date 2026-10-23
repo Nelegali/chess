@@ -15,6 +15,8 @@
   --radius: 14px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* отступ под нижней панелью кнопок на телефоне: над полоской «домой», но без лишней пустоты */
+  --bar-bottom: max(6px, calc(var(--safe-bottom) - 16px));
   color-scheme: dark;
 }
 
@@ -280,8 +282,9 @@ body[data-view='drill'] .app {
 }
 @media (max-width: 760px) {
   body[data-view='learn'] .app,
-  body[data-view='drill'] .app {
-    padding-bottom: calc(88px + var(--safe-bottom));
+  body[data-view='drill'] .app,
+  body[data-view='free'] .app {
+    padding-bottom: calc(66px + var(--bar-bottom));
   }
 }
 
@@ -1379,16 +1382,21 @@ cg-board square.check {
     bottom: 0;
     z-index: 15;
     margin: 0;
-    padding-block: 8px calc(8px + var(--safe-bottom));
-    padding-left: max(12px, env(safe-area-inset-left, 0px));
-    padding-right: max(12px, env(safe-area-inset-right, 0px));
+    gap: 6px;
+    padding-block: 6px var(--bar-bottom);
+    padding-left: max(10px, env(safe-area-inset-left, 0px));
+    padding-right: max(10px, env(safe-area-inset-right, 0px));
     background: color-mix(in srgb, var(--surface) 94%, transparent);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border-top: 1px solid var(--border);
   }
   .actionbar .btn {
-    min-height: 50px;
+    min-height: 44px;
+    padding-block: 6px;
+  }
+  .actionbar .btn.nav {
+    flex-basis: 48px;
   }
   /* на телефоне название дебюта уже в шапке — экономим место под объяснения */
   .panel-head .mode-tag,
