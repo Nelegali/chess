@@ -1,6 +1,10 @@
 // Интеграция с Lichess: ссылки на анализ / игру с компьютером и статистика
 // «что чаще всего играют в этой позиции» из Opening Explorer.
-import { settings } from './store.js';
+//
+// С 2026 года Lichess отдаёт статистику дебютов только авторизованным запросам.
+// Поэтому порядок такой: сначала свой сервер (server.js подставляет LICHESS_TOKEN),
+// затем прямой запрос из браузера с личным токеном из настроек.
+import { settings, checkServer } from './store.js';
 
 const fenPath = (fen) => fen.replace(/ /g, '_');
 
@@ -12,7 +16,25 @@ export function playVsComputerUrl(fen) {
   return `https://lichess.org/?fen=${encodeURIComponent(fen)}#ai`;
 }
 
+export const TOKEN_CREATE_URL =
+  'https://lichess.org/account/oauth/token/create?description=' + encodeURIComponent('Шахматные дебюты');
+
+// kind: 'auth' — Lichess требует вход/токен; 'network' — запрос не дошёл
+// (в т.ч. браузер не пустил ответ); 'http' — другая ошибка сервера.
+export class ExplorerError extends Error {
+  constructor(message, kind) {
+    super(message);
+    this.kind = kind;
+  }
+}
+
 const cache = new Map();
+// Если Lichess уже отказал, не повторяем запрос на каждом ходу — до смены токена.
+let refused = null;
+
+export function resetExplorer() {
+  refused = null;
+}
 
 // uciMoves — ходы от начальной позиции в формате UCI (e2e4, e7e5…)
 export async function explorer(uciMoves) {
@@ -27,30 +49,44 @@ export async function explorer(uciMoves) {
   });
   const key = params.toString();
   if (cache.has(key)) return cache.get(key);
+  if (refused) throw refused;
 
-  const attempts = [];
-  // 1) напрямую из браузера (с личным токеном Lichess, если он указан в настройках)
-  attempts.push(() =>
-    fetch(`https://explorer.lichess.ovh/lichess?${key}`, {
-      headers: settings.lichessToken ? { Authorization: `Bearer ${settings.lichessToken}` } : {},
-    }),
-  );
-  // 2) через свой сервер (server.js), который может подставить токен из переменной окружения
-  attempts.push(() => fetch(`api/explorer?${key}`));
+  let error = null;
 
-  let lastError = 'нет ответа';
-  for (const attempt of attempts) {
+  // 1) свой сервер: работает без ограничений браузера, если на сервере задан LICHESS_TOKEN
+  if (await checkServer()) {
     try {
-      const r = await attempt();
-      if (r.ok) {
-        const data = await r.json();
-        cache.set(key, data);
-        return data;
-      }
-      lastError = r.status === 401 ? 'Lichess просит токен (см. Настройки)' : `HTTP ${r.status}`;
+      const r = await fetch(`api/explorer?${key}`);
+      if (r.ok) return remember(key, await r.json());
+      error =
+        r.status === 401
+          ? new ExplorerError('Lichess требует токен: задайте LICHESS_TOKEN на сервере', 'auth')
+          : new ExplorerError(`Сервер ответил ${r.status}`, 'http');
     } catch (e) {
-      lastError = e.message;
+      error = new ExplorerError(e.message, 'network');
     }
   }
-  throw new Error(lastError);
+
+  // 2) напрямую из браузера
+  try {
+    const r = await fetch(`https://explorer.lichess.ovh/lichess?${key}`, {
+      headers: settings.lichessToken ? { Authorization: `Bearer ${settings.lichessToken}` } : {},
+    });
+    if (r.ok) return remember(key, await r.json());
+    error =
+      r.status === 401 || r.status === 403
+        ? new ExplorerError('Lichess требует вход в аккаунт', 'auth')
+        : new ExplorerError(`Lichess ответил ${r.status}`, 'http');
+  } catch (e) {
+    // Без токена Lichess отвечает отказом, который браузер показывает как сетевую ошибку.
+    error = error && error.kind === 'auth' ? error : new ExplorerError(e.message, settings.lichessToken ? 'network' : 'auth');
+  }
+
+  if (error.kind !== 'http') refused = error;
+  throw error;
+}
+
+function remember(key, data) {
+  cache.set(key, data);
+  return data;
 }

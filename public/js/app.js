@@ -601,7 +601,7 @@ function learnView(lineId) {
         </table>
         <p class="muted small">★ — ход по нашей теории. Полоска: победы белых / ничьи / победы чёрных.</p>`;
     } catch (e) {
-      if (el.isConnected) el.innerHTML = `<p class="muted">Статистика недоступна: ${esc(e.message)}</p>`;
+      if (el.isConnected) renderExplorerHelp(el, e, currentFen(), side, loadExplorer);
     }
   }
 
@@ -712,6 +712,47 @@ function learnView(lineId) {
   onCleanup(() => window.removeEventListener('keydown', onKey));
 
   render();
+}
+
+// Что показать, если статистика Lichess не загрузилась.
+async function renderExplorerHelp(el, e, fen, side, retry) {
+  const hasToken = !!store.settings.lichessToken;
+  const onServer = await store.checkServer();
+  const open = `<a class="btn" target="_blank" rel="noopener" href="${lichess.analysisUrl(fen, colorName(side))}">📖 Открыть эту позицию на Lichess</a>`;
+  let html;
+  if (onServer && e.kind !== 'http') {
+    html = `<p>Не удалось получить статистику через сервер. Проверь, что на сервере задан <code>LICHESS_TOKEN</code> (токен Lichess без галочек) и сервер видит интернет.</p>${open}`;
+  } else if (e.kind === 'http') {
+    html = `<p>Lichess сейчас не отвечает (${esc(e.message)}). Попробуй позже или открой позицию на сайте.</p>${open}`;
+  } else if (hasToken && e.kind === 'network') {
+    html = `<p>С токеном запрос тоже не прошёл: похоже, Lichess не разрешает такие запросы прямо из браузера. Статистика заработает, когда приложение будет на твоём сервере (там запрос идёт через сервер).</p>${open}`;
+  } else if (hasToken) {
+    html = `<p>Lichess не принял токен. Проверь, что он скопирован целиком и не удалён на Lichess.</p>${open}`;
+  } else {
+    html = `<p><b>Lichess закрыл статистику дебютов для анонимных запросов</b> (с 2026 года она доступна только вошедшим в аккаунт).</p>
+      ${open}
+      <p class="muted small">На Lichess войди в аккаунт (он бесплатный) и нажми под доской значок книги — откроется дебютная книга с процентами ходов.</p>`;
+  }
+  el.innerHTML = `<div class="ex-help">
+    ${html}
+    <details class="ex-token">
+      <summary>${hasToken ? 'Заменить токен Lichess' : 'Показывать статистику прямо здесь (нужен токен Lichess)'}</summary>
+      <ol class="small">
+        <li><a href="${lichess.TOKEN_CREATE_URL}" target="_blank" rel="noopener">Создай токен на Lichess</a> — галочки ставить не нужно, просто нажми «Создать».</li>
+        <li>Скопируй токен (начинается с <code>lip_</code>) и вставь сюда:</li>
+      </ol>
+      <div class="row">
+        <input class="input" id="ex-token-input" type="password" placeholder="lip_…" autocomplete="off" value="${esc(store.settings.lichessToken)}">
+        <button type="button" class="btn primary" id="ex-token-save">Сохранить</button>
+      </div>
+    </details>
+  </div>`;
+  el.querySelector('#ex-token-save').onclick = () => {
+    const token = el.querySelector('#ex-token-input').value.trim();
+    store.saveSettings({ lichessToken: token });
+    lichess.resetExplorer();
+    retry();
+  };
 }
 
 // ─────────────────────────── тренировка ───────────────────────────
@@ -1182,7 +1223,7 @@ function profileView() {
     </div>
     <div class="card">
       <h2>Lichess</h2>
-      <p class="muted">Необязательно. Если статистика Lichess не загружается, создай токен без галочек на lichess.org/account/oauth/token и вставь сюда.</p>
+      <p class="muted">С 2026 года Lichess показывает статистику дебютов только вошедшим пользователям. Чтобы видеть её в приложении, <a href="${lichess.TOKEN_CREATE_URL}" target="_blank" rel="noopener">создай токен на Lichess</a> (без галочек) и вставь сюда. На своём сервере вместо этого можно задать LICHESS_TOKEN.</p>
       <input class="input" id="li-token" type="password" placeholder="lip_…" value="${esc(s.lichessToken)}" autocomplete="off">
     </div>
     <div class="card">
@@ -1198,7 +1239,10 @@ function profileView() {
   app.querySelectorAll('[data-set]').forEach((el) =>
     el.addEventListener('change', () => store.saveSettings({ [el.dataset.set]: el.checked })),
   );
-  app.querySelector('#li-token').addEventListener('change', (e) => store.saveSettings({ lichessToken: e.target.value.trim() }));
+  app.querySelector('#li-token').addEventListener('change', (e) => {
+    store.saveSettings({ lichessToken: e.target.value.trim() });
+    lichess.resetExplorer();
+  });
   app.querySelector('#export').onclick = () => {
     const blob = new Blob([store.exportProgress()], { type: 'application/json' });
     const a = document.createElement('a');

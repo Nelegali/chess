@@ -1569,3 +1569,35 @@ cg-board square.check {
 #g-search {
   margin-bottom: 10px;
 }
+
+.ex-help {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  margin: 8px 0;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.ex-help p {
+  margin: 0;
+}
+.ex-help a:not(.btn) {
+  color: var(--blue);
+}
+.ex-token summary {
+  cursor: pointer;
+  color: var(--blue);
+  font-size: 0.9rem;
+  padding: 4px 0;
+}
+.ex-token ol {
+  margin: 6px 0 8px;
+  padding-left: 1.3em;
+}
+.ex-token code {
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
