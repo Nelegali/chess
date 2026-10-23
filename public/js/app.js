@@ -1219,10 +1219,22 @@ function profileView() {
     }
   };
   app.querySelector('#reset').onclick = () => {
-    if (confirm('Точно сбросить весь прогресс? Это нельзя отменить.')) {
+    const { el, close } = modal(`
+      <div class="result">
+        <div class="result-icon">⚠️</div>
+        <h2>Сбросить весь прогресс?</h2>
+        <p>Опыт, серия дней, достижения и расписание повторений будут удалены. Это нельзя отменить.</p>
+        <div class="col">
+          <button class="btn danger big" id="reset-yes">Да, сбросить</button>
+          <button class="btn big" data-close>Отмена</button>
+        </div>
+      </div>`);
+    el.querySelector('#reset-yes').onclick = () => {
+      close();
       store.resetProgress();
       profileView();
-    }
+      toast('Прогресс сброшен');
+    };
   };
   renderSync();
 }
@@ -1414,6 +1426,11 @@ store.onChange(() => {
 route();
 store.pull();
 
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  navigator.serviceWorker.register('sw.js').catch(() => {});
+// Офлайн-режим. В некоторых встроенных окнах service worker запрещён — тогда просто работаем без него.
+try {
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+} catch {
+  /* нет доступа к service worker */
 }

@@ -36,6 +36,22 @@
     color-scheme: light;
   }
 }
+:root[data-theme='light'] {
+  --bg: #f3f0ea;
+  --surface: #ffffff;
+  --surface-2: #f6f3ee;
+  --border: #e2ddd4;
+  --text: #23211d;
+  --muted: #6f6a62;
+  --accent: #5d9a24;
+  --accent-ink: #ffffff;
+  --gold: #d99a00;
+  --red: #d2433a;
+  --blue: #2b7fd0;
+  --purple: #8a5bd6;
+  --shadow: 0 4px 18px rgba(60, 40, 10, 0.1);
+  color-scheme: light;
+}
 
 * {
   box-sizing: border-box;
@@ -104,7 +120,9 @@ p {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: calc(8px + var(--safe-top)) 16px 8px;
+  padding-block: calc(8px + var(--safe-top)) 8px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
@@ -252,7 +270,9 @@ p {
 .app {
   max-width: 1100px;
   margin: 0 auto;
-  padding: 16px 16px calc(96px + var(--safe-bottom));
+  padding-block: 16px calc(96px + var(--safe-bottom));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
 body[data-view='learn'] .app,
 body[data-view='drill'] .app {
@@ -1337,7 +1357,7 @@ cg-board square.check {
   }
   .board-col {
     position: static;
-    margin: -8px -12px 0;
+    margin: -8px -16px 0;
   }
   .board {
     max-width: 100%;
@@ -1360,10 +1380,6 @@ cg-board square.check {
   .hud .xpbar {
     width: 40px;
   }
-  .app {
-    padding-left: 12px;
-    padding-right: 12px;
-  }
   /* кнопки управления всегда под пальцем, без прокрутки */
   .actionbar {
     position: fixed;
@@ -1372,7 +1388,9 @@ cg-board square.check {
     bottom: 0;
     z-index: 15;
     margin: 0;
-    padding: 8px 12px calc(8px + var(--safe-bottom));
+    padding-block: 8px calc(8px + var(--safe-bottom));
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
     background: color-mix(in srgb, var(--surface) 94%, transparent);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
