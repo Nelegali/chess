@@ -2113,6 +2113,11 @@ body[data-view='drill'] .update-bar {
   white-space: nowrap;
   cursor: pointer;
 }
+@media (max-width: 760px) {
+  .mat-long {
+    display: none;
+  }
+}
 .mat-chip.me b {
   color: var(--accent);
 }
@@ -2356,24 +2361,54 @@ cg-board square.mark-lost {
 .pop-line {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin: 0 0 8px;
-  font-size: 0.88rem;
+  gap: 12px;
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--purple) 10%, transparent);
 }
-.pop-line.rare {
+.pop-pct {
+  flex: none;
+  min-width: 2.8em;
+  font-size: 1.45rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--purple);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pop-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.pop-sub {
+  display: block;
+  font-weight: 400;
   color: var(--muted);
 }
 .pop-bar {
-  flex: 0 0 56px;
-  height: 8px;
-  border-radius: 4px;
-  background: var(--surface-2);
+  display: block;
+  height: 6px;
+  margin-top: 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--purple) 18%, transparent);
   overflow: hidden;
 }
 .pop-bar i {
   display: block;
   height: 100%;
+  border-radius: 3px;
   background: var(--purple);
+}
+.pop-line.rare {
+  background: var(--surface-2);
+}
+.pop-line.rare .pop-pct {
+  color: var(--muted);
+  font-size: 1.15rem;
 }
 
 /* очки: стоимость фигур на доске */

@@ -100,23 +100,27 @@ function materialHtml(fen, side, { onlyIfUnequal = false } = {}) {
     </button>`;
 }
 
-// Короткая форма очков для строки под доской: «⚖️ 39 : 36 · +3».
+// Очки для строки под доской. На телефоне коротко: «⚖️ +3 у тебя», на компьютере — с числами.
 function materialChip(fen, side) {
   const m = material(fen);
   const opp = side === 'w' ? 'b' : 'w';
   const diff = m[side] - m[opp];
-  return `<button type="button" class="mat-chip ${diff > 0 ? 'me' : diff < 0 ? 'opp' : ''}" data-material aria-label="Очки: ты ${m[side]}, соперник ${m[opp]}">⚖️ ${m[side]} : ${m[opp]}${diff ? ` <b>${diff > 0 ? '+' : '−'}${Math.abs(diff)}</b>` : ''}</button>`;
+  const who = diff > 0 ? `+${diff} у тебя` : diff < 0 ? `+${-diff} у соперника` : 'поровну';
+  return `<button type="button" class="mat-chip ${diff > 0 ? 'me' : diff < 0 ? 'opp' : ''}" data-material aria-label="Очки (стоимость фигур): ты ${m[side]}, соперник ${m[opp]}">⚖️ <span class="mat-long">Очки: ты ${m[side]} · соперник ${m[opp]} — </span><b>${who}</b></button>`;
 }
 
-// Насколько популярен ход san в позиции со статистикой data (Lichess или встроенной).
+// Насколько популярен ход san в позиции со статистикой data (Lichess или встроенной):
+// крупно — процент партий, рядом — место среди ходов и полоска.
 function popularityHtml(data, san) {
   if (!data || !data.total) return '';
   const k = data.moves.findIndex((m) => m.san === san);
-  if (k < 0) return `<div class="pop-line rare">📊 Редкий ход: среди частых его нет — почти все играют иначе.</div>`;
+  if (k < 0) {
+    return `<div class="pop-line rare"><span class="pop-pct">&lt;1%</span><span class="pop-text">редкий ход<span class="pop-sub">почти все играют иначе</span></span></div>`;
+  }
   const m = data.moves[k];
   const pct = Math.max(1, Math.round(((m.white + m.draws + m.black) / data.total) * 100));
-  const place = k === 0 ? 'самый популярный ход' : `${k + 1}-й по популярности`;
-  return `<div class="pop-line"><span class="pop-bar"><i style="width:${pct}%"></i></span>📊 Так играют в <b>${pct}%</b> партий — ${place}</div>`;
+  const place = k === 0 ? '🥇 самый популярный ход' : k === 1 ? '🥈 второй по популярности' : k === 2 ? '🥉 третий по популярности' : `${k + 1}-й по популярности`;
+  return `<div class="pop-line"><span class="pop-pct">${pct}%</span><span class="pop-text">так играют в партиях<span class="pop-sub">${place}</span><span class="pop-bar"><i style="width:${pct}%"></i></span></span></div>`;
 }
 
 // Раскрыт ли блок «Почему не по-другому?» — запоминаем выбор.
@@ -2988,7 +2992,20 @@ function flashSquareLink(link, scrollToBoard) {
 // не меняет адрес, поэтому перерисовываем вручную.
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-material]')) {
-    toast('⚖️ <b>Очки</b> — стоимость фигур на доске: пешка 1, конь и слон по 3, ладья 5, ферзь 9 (король не считается). У кого больше очков, у того перевес в материале. Рядом — фигуры, которые уже взяты.', '', 7000);
+    const fen = activeBoard && activeBoard.chess ? activeBoard.chess.fen() : null;
+    const side = (activeBoard && activeBoard.myColor) || 'w';
+    const m = fen ? material(fen) : null;
+    const opp = side === 'w' ? 'b' : 'w';
+    const diff = m ? m[side] - m[opp] : 0;
+    const meaning = !m
+      ? ''
+      : diff > 0
+        ? ` Сейчас <b>+${diff} у тебя</b>: твои фигуры вместе стоят на ${diff} больше.`
+        : diff < 0
+          ? ` Сейчас <b>+${-diff} у соперника</b>: его фигуры вместе стоят на ${-diff} больше.`
+          : ' Сейчас <b>поровну</b>.';
+    const now = m ? `<br>У тебя <b>${m[side]}</b>${m.takenFrom[opp] ? ` (взял: ${m.takenFrom[opp]})` : ''}, у соперника <b>${m[opp]}</b>${m.takenFrom[side] ? ` (взял: ${m.takenFrom[side]})` : ''}.` : '';
+    toast(`⚖️ <b>Очки</b> — стоимость фигур на доске: пешка 1, конь и слон по 3, ладья 5, ферзь 9 (король не считается).${meaning}${now}`, '', 8000);
     return;
   }
   const sq = e.target.closest('.sq');

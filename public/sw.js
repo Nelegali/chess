@@ -1,6 +1,6 @@
 // Офлайн-режим: файлы приложения кэшируются, обновления подтягиваются в фоне.
 // VERSION совпадает с версией приложения (js/version.js) — при выпуске обновления меняй обе.
-const VERSION = '1.12.0';
+const VERSION = '1.12.1';
 const CACHE = `chess-openings-${VERSION}`;
 const SHELL = [
   './',
@@ -58,7 +58,10 @@ self.addEventListener('fetch', (e) => {
     caches.open(CACHE).then(async (cache) => {
       const key = e.request.mode === 'navigate' ? 'index.html' : e.request;
       const cached = await cache.match(key, { ignoreSearch: true });
-      const network = fetch(e.request)
+      // no-cache: сверяемся с сервером, а не с HTTP-кэшем браузера. Иначе сразу после выхода версии
+      // в кэш приложения мог записаться старый файл (GitHub Pages разрешает хранить их 10 минут),
+      // и получалась смесь: новый код со старыми стилями.
+      const network = fetch(e.request, { cache: 'no-cache' })
         .then((res) => {
           if (res.ok) cache.put(key, res.clone());
           return res;
