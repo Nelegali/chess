@@ -66,10 +66,16 @@ const VERDICT_UI = {
   ok: { icon: '👌', title: 'Нормальный ход' },
   good: { icon: '👍', title: 'Хороший ход' },
   book: { icon: '📖', title: 'Ход по теории — так и надо!' },
+  lost: { icon: '🏳️', title: 'Спасения уже не было' },
 };
 const verdictBadge = (v) => `<span class="wn-badge v-${v}">${VERDICT_UI[v].icon} ${v === 'book' ? 'по теории' : coach.VERDICTS[v]}</span>`;
-const verdictBanner = (v, note = '') =>
-  `<div class="verdict-banner v-${v}"><span class="vb-icon">${VERDICT_UI[v].icon}</span><span><b>${VERDICT_UI[v].title}</b>${note ? `<span class="vb-note">${note}</span>` : ''}</span></div>`;
+const verdictBanner = (v, note = '', title = VERDICT_UI[v].title) =>
+  `<div class="verdict-banner v-${v}"><span class="vb-icon">${VERDICT_UI[v].icon}</span><span><b>${title}</b>${note ? `<span class="vb-note">${note}</span>` : ''}</span></div>`;
+const BAD_MARK = { '??': 'blunder', '?': 'mistake', '?!': 'dubious' };
+// Соперник ошибся — для ученика это шанс, а не промах.
+const CHANCE_TITLE = { blunder: 'Соперник грубо ошибся — твой шанс!', mistake: 'Соперник ошибся — накажи!', lost: 'Соперник проигрывает — добивай!' };
+const chanceBanner = (v, note = '') =>
+  `<div class="verdict-banner v-chance"><span class="vb-icon">🎯</span><span><b>${CHANCE_TITLE[v]}</b>${note ? `<span class="vb-note">${note}</span>` : ''}</span></div>`;
 
 // Очки — стоимость фигур на доске: пешка 1, конь и слон по 3, ладья 5, ферзь 9 (король не считается).
 const PIECE_POINTS = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
@@ -1924,7 +1930,12 @@ function freeView() {
     const m = moves[i];
     let a;
     const book = bookFor(i);
-    if (book.length) {
+    // ход из базы, но помеченный ?? / ? / ?! — это промах из разобранной ловушки, а не «теория»
+    const trap = book.find((e) => BAD_MARK[e.annotation]);
+    if (trap) {
+      const next = trap.line.steps[trap.ply + 1];
+      a = { verdict: BAD_MARK[trap.annotation], text: trap.text, arrows: trap.arrows, reply: next ? sanToMove(fens[i + 1], next.m.replace(/[!?]+$/, '')) : null };
+    } else if (book.length) {
       a = { verdict: 'book', text: book[0].text, arrows: book[0].arrows };
     } else {
       const known = bookMain(fens[i]);
@@ -1939,6 +1950,24 @@ function freeView() {
     return a;
   }
 
+  // Оценка для показа: тренер сверяется с движком (если тот уже считал позицию до хода),
+  // а про ход соперника текст обращён к ученику.
+  function judged(i) {
+    let a = analyse(i);
+    const mine = turnAt(fens[i]) === side;
+    const bad = a.verdict === 'blunder' || a.verdict === 'mistake';
+    const before = engineLines.get(fens[i]);
+    const line = bad && Array.isArray(before) && before.length ? before.find((x) => x.uci === uciOf(moves[i])) : null;
+    if (line && engine.scoreOf(before[0]) - engine.scoreOf(line) <= 30) {
+      // движок считает ход лучшим или почти: значит, другие ходы не лучше
+      a =
+        engine.scoreOf(line) <= -200
+          ? { ...a, verdict: 'lost', text: `${a.text} Но другие ходы не лучше: позиция уже была плохой, ошибка случилась раньше.` }
+          : { ...a, verdict: 'ok', reply: null, text: `${a.text} Но движок проверил глубже: это один из лучших ходов здесь — другие не лучше.` };
+    }
+    return mine ? a : { ...a, text: coach.forOpponentMove(a.text) };
+  }
+
   // Разбор последнего хода: плашка с оценкой, насколько ход популярен, объяснение.
   function lastMoveCard() {
     if (cursor === 0) {
@@ -1950,7 +1979,7 @@ function freeView() {
     const i = cursor - 1;
     const m = moves[i];
     const mover = turnAt(fens[i]);
-    const a = analyse(i);
+    const a = judged(i);
     const ex = explorerData.get(fens[i]);
     const pop = ex && ex.data ? popularityHtml(ex.data, m.san) : '';
     // что сказал движок про этот ход (если он уже считал позицию до хода)
@@ -1962,10 +1991,15 @@ function freeView() {
         ? `<div class="eng-note">${engineChip({ line: l, delta: engine.scoreOf(before[0]) - engine.scoreOf(l) }, mover)}${l.rank === 1 ? '' : ` <span class="muted small">лучше было ${figurine(sanToMove(fens[i], { from: before[0].uci.slice(0, 2), to: before[0].uci.slice(2, 4), promotion: before[0].uci[4] })?.san || '')}</span>`}</div>`
         : `<div class="eng-note"><span class="c-chip e-bad">🤖 не в числе лучших ходов движка</span> <span class="muted small">лучше было ${figurine(sanToMove(fens[i], { from: before[0].uci.slice(0, 2), to: before[0].uci.slice(2, 4), promotion: before[0].uci[4] })?.san || '')}</span></div>`;
     }
+    const mine = mover === side;
     const punish =
-      a.reply && (a.verdict === 'blunder' || a.verdict === 'mistake')
-        ? `Красная стрелка на доске — как ${mover === side ? 'соперник накажет' : 'ты можешь наказать'}: ${figurine(a.reply.san)}`
+      a.reply && (a.verdict === 'blunder' || a.verdict === 'mistake' || a.verdict === 'lost')
+        ? mine
+          ? `Красная стрелка на доске — ответ соперника: ${figurine(a.reply.san)}`
+          : `Зелёная стрелка на доске — твой ход: ${figurine(a.reply.san)}`
         : '';
+    // ошибка соперника — это шанс ученика: показываем зелёным, а не как его промах
+    const chance = !mine && (a.verdict === 'blunder' || a.verdict === 'mistake' || a.verdict === 'lost');
     const c = new Chess(fen());
     const over = c.isCheckmate()
       ? `<div class="prompt done">🏁 Мат! Победили ${mover === 'w' ? 'белые' : 'чёрные'}.</div>`
@@ -1973,13 +2007,13 @@ function freeView() {
         ? '<div class="prompt done">🤝 Ничья.</div>'
         : '';
     const choosing = !over && turnAt(fen()) !== side;
-    const bad = a.verdict === 'blunder' || a.verdict === 'mistake';
+    const bad = a.verdict === 'blunder' || a.verdict === 'mistake' || a.verdict === 'lost';
     const text = choosing && !bad
       ? `<details class="why-more"><summary>Почему?</summary><p class="explain">${rich(a.text)}</p></details>`
       : `<p class="explain">${rich(a.text)}</p>`;
-    return `<div class="move-card vc-${a.verdict}">
-        <div class="move-head"><span class="san">${moveLabel(i, m.san)}</span><span class="who ${mover === side ? 'me' : 'opp'}">${mover === side ? 'твой ход' : 'ход соперника'}</span></div>
-        ${verdictBanner(a.verdict, punish)}
+    return `<div class="move-card vc-${chance ? 'chance' : a.verdict}">
+        <div class="move-head"><span class="san">${moveLabel(i, m.san)}</span><span class="who ${mine ? 'me' : 'opp'}">${mine ? 'твой ход' : 'ход соперника'}</span></div>
+        ${chance ? chanceBanner(a.verdict, punish) : verdictBanner(a.verdict, punish, !mine && a.verdict === 'book' ? 'Соперник играет по теории' : undefined)}
         ${pop}
         ${engineNote}
         ${text}
@@ -1991,16 +2025,18 @@ function freeView() {
     if (cursor === 0) return { shapes: [], marks: [] };
     const i = cursor - 1;
     const m = moves[i];
-    const a = analyse(i);
+    const a = judged(i);
+    const mine = turnAt(fens[i]) === side;
     const shapes = [];
     const marks = [];
     const glyph = glyphShape(m.to, a.verdict);
     if (glyph) shapes.push(glyph);
     const cls = { blunder: 'mark-bad', mistake: 'mark-bad', dubious: 'mark-warn', good: 'mark-good', book: 'mark-good' }[a.verdict];
     if (cls) marks.push([m.to, cls]);
-    if (a.reply && (a.verdict === 'blunder' || a.verdict === 'mistake')) {
-      shapes.push({ orig: a.reply.from, dest: a.reply.to, brush: 'red', modifiers: { lineWidth: 13 } });
-      if (a.reply.captured) marks.push([a.reply.to, 'mark-lost']);
+    if (a.reply && (a.verdict === 'blunder' || a.verdict === 'mistake' || a.verdict === 'lost')) {
+      // свой промах — красная стрелка (как накажут), промах соперника — зелёная (как наказать)
+      shapes.push({ orig: a.reply.from, dest: a.reply.to, brush: mine ? 'red' : 'green', modifiers: { lineWidth: 13 } });
+      if (a.reply.captured) marks.push([a.reply.to, mine ? 'mark-lost' : 'mark-good']);
     }
     return { shapes, marks };
   }
@@ -2097,7 +2133,8 @@ function freeView() {
     if (line.mate != null) v = line.mate > 0 ? `мат в ${line.mate} у ${name(mover)}` : `мат в ${-line.mate} у ${name(other)}`;
     else if (Math.abs(line.cp) < 30) v = '≈ поровну';
     else v = `+${(Math.abs(line.cp) / 100).toFixed(1)} у ${name(line.cp > 0 ? mover : other)}`;
-    const [cls, word] = line.rank === 1 ? ['e-best', 'лучший ход'] : delta <= 30 ? ['e-good', 'почти так же хорош'] : delta <= 100 ? ['e-ok', 'чуть хуже'] : ['e-bad', 'заметно хуже'];
+    // про ходы соперника уточняем, для кого ход лучший
+    const [cls, word] = line.rank === 1 ? ['e-best', mover === side ? 'лучший ход' : `лучший ход ${name(mover)}`] : delta <= 30 ? ['e-good', 'почти так же хорош'] : delta <= 100 ? ['e-ok', 'чуть хуже'] : ['e-bad', 'заметно хуже'];
     return `<span class="c-chip ${cls}">🤖 ${v} · ${word}</span>`;
   }
 
@@ -2175,7 +2212,7 @@ function freeView() {
               : '';
             const chips = [];
             if (r.book) chips.push(`<span class="c-chip book">★ ${r.book.labels.slice(0, 2).map(esc).join(' · ')}</span>`);
-            if (r.score != null) chips.push(`<span class="c-chip score">🏆 ${Math.round(r.score * 100)}% очков</span>`);
+            if (r.score != null) chips.push(`<span class="c-chip score">🏆 ${Math.round(r.score * 100)}% очков${mine ? '' : ` у ${turn === 'w' ? 'белых' : 'чёрных'}`}</span>`);
             if (r.eng) chips.push(engineChip(r.eng));
             else if (listMode === 'best' && Array.isArray(lines)) chips.push('<span class="c-chip e-bad">🤖 не в числе лучших</span>');
             const note = chips.length ? `<span class="c-chips">${chips.join('')}</span>` : '';
@@ -2196,6 +2233,7 @@ function freeView() {
     return `<div class="cands">
         <div class="cands-title">${title}</div>
         ${modes}
+        ${listMode === 'best' && !mine ? `<p class="muted small">Сверху — самые сильные ходы ${turn === 'w' ? 'белых' : 'чёрных'}: так ответит сильный соперник. Оценка показывает, у кого перевес даже после его лучшего хода.</p>` : ''}
         ${engineStatus}
         ${list}
         ${rows.some((r) => r.eng) ? '<p class="muted small">🤖 Оценка движка Stockfish после хода: «+1.0 у белых» — у белых перевес примерно в лишнюю пешку, «≈ поровну» — силы равны. «Лучший ход» — самый сильный по мнению движка; в начале партии у белых обычно небольшой плюс.</p>' : ''}
@@ -2333,13 +2371,14 @@ function freeView() {
   function lastMoveSummary() {
     if (cursor === 0) return '';
     const i = cursor - 1;
-    const a = analyse(i);
+    const a = judged(i);
+    const chance = turnAt(fens[i]) !== side && (a.verdict === 'blunder' || a.verdict === 'mistake' || a.verdict === 'lost');
     const ex = explorerData.get(fens[i]);
     const data = ex && ex.data;
     const st = data && data.total ? data.moves.find((m) => m.san === moves[i].san) : null;
     const pct = st ? ` · так играют в ${Math.max(1, Math.round(((st.white + st.draws + st.black) / data.total) * 100))}%` : data && data.total ? ' · редкий ход' : '';
-    return `<button type="button" class="last-sum vc-${a.verdict}" data-go="0">
-        <span>${moveLabel(i, moves[i].san)}</span>${verdictBadge(a.verdict)}<span class="muted small">${pct}</span><span class="ls-more">разбор ›</span>
+    return `<button type="button" class="last-sum vc-${chance ? 'chance' : a.verdict}" data-go="0">
+        <span>${moveLabel(i, moves[i].san)}</span>${chance ? '<span class="wn-badge v-chance">🎯 соперник ошибся</span>' : verdictBadge(a.verdict)}<span class="muted small">${pct}</span><span class="ls-more">разбор ›</span>
       </button>`;
   }
 
@@ -2494,17 +2533,21 @@ function freeView() {
       fens.push(c.fen());
       cursor++;
     }
-    const a = analyse(cursor - 1);
-    page = mv.color === side && a.verdict !== 'blunder' && a.verdict !== 'mistake' ? 1 : 0;
+    const a = judged(cursor - 1);
+    const bad = a.verdict === 'blunder' || a.verdict === 'mistake';
+    page = mv.color === side && !bad ? 1 : 0;
     render();
-    // свой ход: вспышка и звук по оценке; ход соперника — обычный звук
-    if (mv.color === side && (a.verdict === 'blunder' || a.verdict === 'mistake')) {
+    // свой ход: вспышка и звук по оценке; ошибка соперника — зелёная вспышка (твой шанс)
+    if (mv.color === side && bad) {
       board.pulse('bad');
       sound('wrong');
     } else if (mv.color === side && (a.verdict === 'book' || a.verdict === 'good')) {
       board.pulse('good');
       sound('correct');
-    } else sound(mv.captured ? 'capture' : 'move');
+    } else {
+      if (mv.color !== side && bad) board.pulse('good');
+      sound(mv.captured ? 'capture' : 'move');
+    }
   }
 
   function onUserMove(m) {

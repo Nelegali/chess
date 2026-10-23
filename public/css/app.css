@@ -1738,6 +1738,13 @@ cg-board square.check {
 .v-good {
   --v: var(--accent);
 }
+.v-lost {
+  --v: var(--muted);
+}
+/* соперник ошибся — шанс для ученика */
+.v-chance {
+  --v: var(--accent);
+}
 .ann {
   font-size: 0.72rem;
   font-weight: 700;
@@ -2403,7 +2410,8 @@ body[data-view='drill'] .update-bar {
   font-size: 0.85rem;
 }
 .verdict-banner.v-blunder,
-.verdict-banner.v-mistake {
+.verdict-banner.v-mistake,
+.verdict-banner.v-chance {
   animation: vb-pop 0.45s ease-out;
 }
 @keyframes vb-pop {
@@ -2433,6 +2441,13 @@ body[data-view='drill'] .update-bar {
 }
 .move-card.vc-book {
   border-left: 6px solid var(--blue);
+}
+.move-card.vc-lost {
+  border-left: 6px solid var(--muted);
+}
+.move-card.vc-chance {
+  border-left: 6px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
 }
 .wrong-msg.vc-blunder,
 .wrong-msg.vc-mistake {
@@ -2627,6 +2642,12 @@ cg-board square.mark-lost {
 }
 .last-sum.vc-book {
   border-left-color: var(--blue);
+}
+.last-sum.vc-chance {
+  border-left-color: var(--accent);
+}
+.last-sum.vc-lost {
+  border-left-color: var(--muted);
 }
 .ls-more {
   margin-left: auto;

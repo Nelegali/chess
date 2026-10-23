@@ -20,9 +20,11 @@ export const VERDICTS = {
   dubious: 'сомнительно',
   ok: 'можно, но…',
   good: 'тоже хорошо',
+  lost: 'спасения нет',
 };
 
-const SEVERITY = { blunder: 4, mistake: 3, dubious: 2, ok: 1, good: 0 };
+// lost — ход не хуже других, просто позиция уже проиграна (ошибка была раньше)
+const SEVERITY = { blunder: 4, mistake: 3, dubious: 2, ok: 1, lost: 1, good: 0 };
 
 const fig = (san) => san.replace(/^[KQRBN]/, (c) => FIG[c]);
 const clean = (san) => san.replace(/[!?]+$/, '');
@@ -243,6 +245,32 @@ function mateInOne(chess) {
   return null;
 }
 
+// Есть ли ход, после которого соперник не ставит мат сразу.
+function canAvoidMate(fen) {
+  const c = new Chess(fen);
+  for (const m of c.moves({ verbose: true })) {
+    c.move(m);
+    const mated = mateInOne(c);
+    c.undo();
+    if (!mated) return true;
+  }
+  return false;
+}
+
+// Тексты тренера написаны для того, кто ходит. Когда разбираем ход соперника — обращаемся к ученику.
+const OPPONENT_VIEW = [
+  [/соперник сразу ставит мат/g, 'ты сразу ставишь мат'],
+  [/соперник ставит мат/g, 'ты ставишь мат'],
+  [/соперник просто забирает/g, 'ты просто забираешь'],
+  [/соперник забирает/g, 'ты забираешь'],
+  [/Соперник забирает/g, 'Ты забираешь'],
+  [/лёгкие фигуры соперника будут нападать на него с темпом, а твоё развитие/g, 'твои лёгкие фигуры будут нападать на него с темпом, а развитие соперника'],
+  [/как соперник сможет нападать на ферзя, заодно развивая свои фигуры/g, 'как ты сможешь нападать на ферзя, заодно развивая свои фигуры'],
+];
+export function forOpponentMove(text) {
+  return OPPONENT_VIEW.reduce((t, [re, to]) => t.replace(re, to), text);
+}
+
 // Каких вражеских фигур новые атаки после хода (нападение «с темпом»).
 function newThreats(after, move) {
   const enemy = move.color === 'w' ? 'b' : 'w';
@@ -327,10 +355,15 @@ function explainCore(fenBefore, alt, theory, { lineId, ply, reveal = true } = {}
   // 1. Мат в один ход
   const mate = mateInOne(after);
   if (mate) {
-    return result('blunder', `После ${altFig} соперник сразу ставит мат: ${fig(mate.san)}!`, [
+    const hopeless = !canAvoidMate(fenBefore);
+    const demo = [
       { m: alt.san, t: authored || `Ход ${altFig}…` },
-      { m: mate.san, t: `…и мат! Вот почему так нельзя.` },
-    ]);
+      { m: mate.san, t: hopeless ? '…и мат: другие ходы тоже не спасали.' : `…и мат! Вот почему так нельзя.` },
+    ];
+    if (hopeless) {
+      return result('lost', `Спасения уже не было: после любого хода — мат. Здесь это ${fig(mate.san)}. Ошибка была раньше.`, demo);
+    }
+    return result('blunder', `После ${altFig} соперник сразу ставит мат: ${fig(mate.san)}!`, demo);
   }
 
   // 2. Ход есть в базе
