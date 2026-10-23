@@ -44,6 +44,8 @@ const squaresText = (s) =>
 
 // Экранированный текст, где термины из словаря — нажимаемые кнопки, а клетки подсвечиваются.
 const rich = (s) => linkTerms(squaresText(figText(esc(s))));
+// Для текста внутри кнопок: без кнопок-терминов (кнопка в кнопке ломает разметку), клетки остаются.
+const richInButton = (s) => squaresText(figText(esc(s)));
 
 // Доска текущего экрана — на ней подсвечиваются клетки из текста.
 let activeBoard = null;
@@ -107,6 +109,37 @@ function materialChip(fen, side) {
   const diff = m[side] - m[opp];
   const who = diff > 0 ? `+${diff} у тебя` : diff < 0 ? `+${-diff} у соперника` : 'поровну';
   return `<button type="button" class="mat-chip ${diff > 0 ? 'me' : diff < 0 ? 'opp' : ''}" data-material aria-label="Очки (стоимость фигур): ты ${m[side]}, соперник ${m[opp]}">⚖️ <span class="mat-long">Очки: ты ${m[side]} · соперник ${m[opp]} — </span><b>${who}</b></button>`;
+}
+
+// Окно «что такое очки»: стоимость фигур и счёт в текущей позиции.
+function showMaterial() {
+  const fen = activeBoard && activeBoard.chess ? activeBoard.chess.fen() : null;
+  const side = (activeBoard && activeBoard.myColor) || 'w';
+  const opp = side === 'w' ? 'b' : 'w';
+  const m = fen ? material(fen) : null;
+  const diff = m ? m[side] - m[opp] : 0;
+  const verdict = !m
+    ? ''
+    : diff > 0
+      ? `<p class="mat-verdict me">У тебя перевес: <b>+${diff}</b> — твои фигуры вместе стоят на ${diff} ${plural(diff, 'очко', 'очка', 'очков')} больше.</p>`
+      : diff < 0
+        ? `<p class="mat-verdict opp">У соперника перевес: <b>+${-diff}</b> — его фигуры вместе стоят на ${-diff} ${plural(-diff, 'очко', 'очка', 'очков')} больше.</p>`
+        : '<p class="mat-verdict">Сейчас <b>поровну</b> — ни у кого нет лишнего материала.</p>';
+  const score = m
+    ? `<div class="mat-score">
+        <div><span class="muted small">Ты</span><b>${m[side]}</b><span class="mat-took">${m.takenFrom[opp] ? `взял: ${m.takenFrom[opp]}` : 'пока никого не взял'}</span></div>
+        <div><span class="muted small">Соперник</span><b>${m[opp]}</b><span class="mat-took">${m.takenFrom[side] ? `взял: ${m.takenFrom[side]}` : 'пока никого не взял'}</span></div>
+      </div>`
+    : '';
+  modal(`
+    <h2>⚖️ Очки</h2>
+    <p>Очки — это стоимость фигур на доске. Так удобно понять, кто «богаче»: выгоден ли размен и не отдал ли кто-то фигуру зря.</p>
+    <div class="mat-values">
+      <span>♙ пешка <b>1</b></span><span>♘ конь <b>3</b></span><span>♗ слон <b>3</b></span><span>♖ ладья <b>5</b></span><span>♕ ферзь <b>9</b></span><span>♔ король — не считается</span>
+    </div>
+    ${score}
+    ${verdict}
+    <button type="button" class="btn primary" data-close>Понятно</button>`);
 }
 
 // Насколько популярен ход san в позиции со статистикой data (Lichess или встроенной):
@@ -294,7 +327,8 @@ function modal(html, { onClose } = {}) {
 function toast(html, cls = '', ms = 3200) {
   const t = document.createElement('div');
   t.className = `toast ${cls}`;
-  t.innerHTML = html;
+  // значок + текст (достижения) раскладываем в строку, обычный текст — одним блоком
+  t.innerHTML = html.includes('ach-icon') ? html : `<div class="toast-text">${html}</div>`;
   document.body.appendChild(t);
   requestAnimationFrame(() => t.classList.add('show'));
   setTimeout(() => {
@@ -2057,7 +2091,7 @@ function freeView() {
             const note = r.book ? `<span class="c-note">★ ${r.book.labels.slice(0, 2).map(esc).join(' · ')}</span>` : '';
             // зачем этот ход: из урока, а если его нет в базе — короткая идея от тренера
             const idea = (r.book && r.book.text) || coach.moveIdea(fen(), r.move);
-            const ideaHtml = idea ? `<span class="c-idea">${rich(idea)}</span>` : '';
+            const ideaHtml = idea ? `<span class="c-idea">${richInButton(idea)}</span>` : '';
             return `<button type="button" class="cand ${r.book ? 'book' : ''}" data-k="${k}">
                 <span class="c-san">${figurine(r.san)}</span><span class="c-pct">${pct}</span><span class="c-bar">${bar}</span>${note}${ideaHtml}
               </button>`;
@@ -2992,20 +3026,7 @@ function flashSquareLink(link, scrollToBoard) {
 // не меняет адрес, поэтому перерисовываем вручную.
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-material]')) {
-    const fen = activeBoard && activeBoard.chess ? activeBoard.chess.fen() : null;
-    const side = (activeBoard && activeBoard.myColor) || 'w';
-    const m = fen ? material(fen) : null;
-    const opp = side === 'w' ? 'b' : 'w';
-    const diff = m ? m[side] - m[opp] : 0;
-    const meaning = !m
-      ? ''
-      : diff > 0
-        ? ` Сейчас <b>+${diff} у тебя</b>: твои фигуры вместе стоят на ${diff} больше.`
-        : diff < 0
-          ? ` Сейчас <b>+${-diff} у соперника</b>: его фигуры вместе стоят на ${-diff} больше.`
-          : ' Сейчас <b>поровну</b>.';
-    const now = m ? `<br>У тебя <b>${m[side]}</b>${m.takenFrom[opp] ? ` (взял: ${m.takenFrom[opp]})` : ''}, у соперника <b>${m[opp]}</b>${m.takenFrom[side] ? ` (взял: ${m.takenFrom[side]})` : ''}.` : '';
-    toast(`⚖️ <b>Очки</b> — стоимость фигур на доске: пешка 1, конь и слон по 3, ладья 5, ферзь 9 (король не считается).${meaning}${now}`, '', 8000);
+    showMaterial();
     return;
   }
   const sq = e.target.closest('.sq');

@@ -2118,6 +2118,49 @@ body[data-view='drill'] .update-bar {
     display: none;
   }
 }
+.mat-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+.mat-values span {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 0.9rem;
+}
+.mat-score {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 12px 0 8px;
+}
+.mat-score > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.mat-score b {
+  font-size: 1.8rem;
+  line-height: 1.1;
+}
+.mat-score .mat-took {
+  font-size: 0.85rem;
+  letter-spacing: 0;
+}
+.mat-verdict.me b {
+  color: var(--accent);
+}
+.mat-verdict.opp b {
+  color: var(--red);
+}
+.toast-text {
+  line-height: 1.4;
+}
 .mat-chip.me b {
   color: var(--accent);
 }
