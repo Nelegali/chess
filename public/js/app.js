@@ -470,6 +470,7 @@ function playLayout(opening, line, mode) {
           <span><i class="lg b"></i>план / защита</span>
           <span><i class="lg y"></i>важное поле</span>
         </div>
+        <p class="version-note muted">${versionText()}</p>
       </div>
       <div class="panel">
         <div class="panel-head">
@@ -558,6 +559,7 @@ function learnView(lineId) {
   function renderIntro() {
     const last = essencePos.last;
     board.load(essencePos.fen, last ? [last.from, last.to] : undefined);
+    board.setHint(null);
     board.shapes(parseArrows(essence.a));
     renderDots(dots, N, -1, side, fens);
     body.innerHTML = `
@@ -793,7 +795,7 @@ function learnView(lineId) {
   function startDemo(c) {
     if (!c || !c.demo) return;
     badge.hidden = true;
-    startAlt({ label: c.demoLabel || `Почему не ${figurine(c.san)}?`, intro: c.text, steps: c.demo }, ply);
+    startAlt({ label: c.demoLabel || `Почему не ${figurine(c.san)}?`, intro: c.text, steps: c.demo }, ply, { autoReply: true });
   }
 
   function explorerBlock() {
@@ -850,6 +852,7 @@ function learnView(lineId) {
   }
 
   function forward() {
+    clearTimeout(altTimer);
     if (intro) {
       intro = false;
       return render();
@@ -869,6 +872,7 @@ function learnView(lineId) {
   }
 
   function back() {
+    clearTimeout(altTimer);
     wrongMsg = '';
     if (alt) {
       if (alt.ply > 0) alt.ply--;
@@ -908,10 +912,27 @@ function learnView(lineId) {
 
   // base — с какой позиции начинается вариант: по умолчанию он заменяет показанный ход,
   // а для «почему не по-другому» — ход, который ученику предстоит сделать.
-  function startAlt(def, base = ply - 1) {
+  // Первый ход варианта сразу играется на доске, а с autoReply — и ответ соперника,
+  // чтобы было видно, что произошло, без лишних нажатий.
+  let altTimer = null;
+  onCleanup(() => clearTimeout(altTimer));
+  function startAlt(def, base = ply - 1, { autoReply = false } = {}) {
+    clearTimeout(altTimer);
     const built = buildLine(def.steps, fens[base]);
-    alt = { def, base, ply: 0, ...built };
+    const current = { def, base, ply: 0, ...built };
+    alt = current;
     render();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const step = (to, then) => {
+      altTimer = setTimeout(() => {
+        if (alt !== current || current.ply !== to - 1 || to > def.steps.length) return;
+        current.ply = to;
+        sound(current.moves[to - 1].captured ? 'capture' : 'move');
+        render();
+        if (then) then();
+      }, to === 1 ? 450 : 1300);
+    };
+    step(1, autoReply && def.steps.length > 1 ? () => step(2) : null);
   }
 
   function renderAlt() {
@@ -919,15 +940,25 @@ function learnView(lineId) {
     const step = alt.ply > 0 ? def.steps[alt.ply - 1] : null;
     const last = alt.ply > 0 ? alt.moves[alt.ply - 1] : moves[alt.base - 1];
     board.load(alt.fens[alt.ply], last ? [last.from, last.to] : undefined);
-    board.shapes(shapesFor(step, alt.fens[alt.ply], null));
+    board.setHint(null);
+    const altShapes = shapesFor(step, alt.fens[alt.ply], null);
+    // У ходов без своих стрелок рисуем сам ход: наш — синим, соперника — красным.
+    if (step && !step.a && alt.ply > 0) {
+      const m = alt.moves[alt.ply - 1];
+      altShapes.push({ orig: m.from, dest: m.to, brush: m.color === side ? 'blue' : 'red' });
+    }
+    board.shapes(altShapes);
     const done = alt.ply >= def.steps.length;
     body.innerHTML = `
       <div class="move-card alt-card">
         <div class="alt-label">🤔 ${esc(def.label)}</div>
+        ${def.intro ? `<p class="alt-intro-text">${rich(def.intro)}</p>` : ''}
         ${
           step
             ? `<div class="move-head"><span class="san">${moveLabel(alt.base + alt.ply - 1, clean(step.m))}</span>${annBadge(step.m)}</div><p class="explain">${rich(step.t)}</p>`
-            : `<p class="explain">${rich(def.intro || 'Посмотрим, что будет.')}</p>`
+            : def.intro
+              ? ''
+              : '<p class="explain">Посмотрим, что будет.</p>'
         }
       </div>
       ${done ? '<div class="prompt done">Вот к чему это приводит. Возвращаемся к главной линии!</div>' : ''}
@@ -939,6 +970,7 @@ function learnView(lineId) {
       </div>`;
     bindCommon();
     body.querySelector('#back-main').onclick = () => {
+      clearTimeout(altTimer);
       alt = null;
       render();
     };
@@ -1266,7 +1298,8 @@ function reviewView() {
           .join('')}
       </div>
       <p class="muted">Без ошибок — вариант переходит на следующую ступень, и следующее повторение будет позже. Одна ошибка — ступень та же. Две и больше — вариант возвращается на первую ступень. С 4-й ступени вариант считается выученным.</p>
-    </div>`;
+    </div>
+    <p class="version-note muted">${versionText()}</p>`;
 }
 
 // ─────────────────────────── викторина ───────────────────────────
@@ -1321,7 +1354,8 @@ function quizView() {
       <p class="muted">${Object.keys(store.progress.learned).length >= 3 ? 'Вопросы — по вариантам, которые ты уже изучал.' : 'Пока вопросы по всем дебютам. Изучи 3 варианта — и викторина будет по твоим.'}</p>
       <p>Лучший результат: <b>${store.progress.quizBest || 0}/10</b></p>
       <button class="btn primary big" id="start">▶ Начать</button>
-    </section>`;
+    </section>
+    <p class="version-note muted">${versionText()}</p>`;
   app.querySelector('#start').onclick = () => runQuiz(makeQuiz());
 }
 
@@ -1730,7 +1764,8 @@ function theoryView() {
             .join('')}`,
         )
         .join('')}
-    </div>`;
+    </div>
+    <p class="version-note muted">${versionText()}</p>`;
   const search = app.querySelector('#g-search');
   search.addEventListener('input', () => {
     app.querySelector('#glossary').innerHTML = glossaryHtml(search.value.trim().toLowerCase());

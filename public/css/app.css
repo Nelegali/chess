@@ -1972,3 +1972,9 @@ body[data-view='drill'] .update-bar {
   bottom: auto;
   top: calc(56px + var(--safe-top));
 }
+
+.alt-intro-text {
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
