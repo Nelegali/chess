@@ -2521,6 +2521,87 @@ cg-board square.mark-lost {
   }
 }
 
+/* ───── профили и синхронизация ───── */
+
+.who-av {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+.who-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 6px 0 8px;
+}
+.who-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 8px;
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.who-btn.on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+}
+.who-emoji {
+  font-size: 2rem;
+  line-height: 1.1;
+}
+#sync-card h3 {
+  margin: 14px 0 4px;
+  font-size: 1rem;
+}
+.pair-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 10px 0;
+}
+.pair-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+.qr {
+  width: 180px;
+  max-width: 100%;
+  padding: 6px;
+  border-radius: 8px;
+  background: #fff;
+}
+.qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.emoji-pick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
+}
+.emoji-btn {
+  width: 44px;
+  height: 44px;
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 1.4rem;
+  cursor: pointer;
+}
+.emoji-btn.on {
+  border-color: var(--accent);
+}
+
 /* ───── урок на телефоне: доска закреплена, объяснение хода сразу под ней ───── */
 
 .board-stage {

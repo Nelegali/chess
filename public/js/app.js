@@ -2,6 +2,7 @@ import { OPENINGS, CATEGORIES, SIGNATURE, findLine, lineSide, allLines } from '.
 import * as store from './store.js';
 import { Board, Chess, parseArrows, threatArrows, sanToMove, moveLabel, figurine, PIECE_NAME, FLASH_MS, PATH_MS, circleShapes, pathArrows, destroyBoard, guardRedraw, hasSize, glyphShape } from './board.js';
 import { Chessground } from '../vendor/chessground.js';
+import qrcode from '../vendor/qrcode.js';
 import { play as sound } from './sound.js';
 import * as lichess from './lichess.js';
 import { moveStats } from './popularity.js';
@@ -239,7 +240,8 @@ function renderTopbar(opts = {}) {
   topbar.innerHTML = `
     ${back}
     <div class="title">${esc(opts.title || '')}</div>
-    <a class="hud" href="#/profile" aria-label="Профиль">
+    <a class="hud" href="#/profile" aria-label="Профиль: ${esc(store.activeProfile().name)}">
+      <span class="who-av" title="${esc(store.activeProfile().name)}">${store.activeProfile().emoji}</span>
       <span class="streak ${s ? '' : 'off'}" title="Серия дней">🔥 ${s}</span>
       <span class="lvl" title="${esc(lv.rank)}">
         <b>${lv.level}</b>
@@ -1726,11 +1728,12 @@ function runQuiz(qs) {
 // Играешь как хочешь: приложение пишет, какой дебют получается, а на ходу соперника
 // показывает его самые популярные ответы (Lichess + наша база) — ты выбираешь, как он сыграет.
 
-const FREE_KEY = 'free-game';
+// У каждого профиля своя партия (у первого — под прежним ключом).
+const freeKey = () => (store.profiles.active === 'p1' ? 'free-game' : `free-game:${store.profiles.active}`);
 
 function loadFreeGame() {
   try {
-    const g = JSON.parse(localStorage.getItem(FREE_KEY) || 'null');
+    const g = JSON.parse(localStorage.getItem(freeKey()) || 'null');
     if (g && (g.side === 'w' || g.side === 'b') && Array.isArray(g.sans)) return g;
   } catch {}
   return { side: 'w', sans: [], cursor: 0 };
@@ -1802,7 +1805,7 @@ function freeView() {
   const fen = () => fens[cursor];
   const save = () => {
     try {
-      localStorage.setItem(FREE_KEY, JSON.stringify({ side, sans: moves.map((m) => m.san), cursor }));
+      localStorage.setItem(freeKey(), JSON.stringify({ side, sans: moves.map((m) => m.san), cursor }));
     } catch {}
   };
   const uci = (m) => m.from + m.to + (m.promotion || '');
@@ -2390,7 +2393,22 @@ function profileView() {
     cells.push(`<i class="c${lvl}" title="${key}: ${xp} XP"></i>`);
   }
 
+  const me = store.activeProfile();
   app.innerHTML = `
+    <section class="card who-card">
+      <h2>Кто занимается</h2>
+      <div class="who-list">
+        ${store.profiles.list
+          .map((x) => {
+            const xlv = store.levelInfo(store.progressOf(x.id).xp);
+            return `<button type="button" class="who-btn ${x.id === me.id ? 'on' : ''}" data-profile="${x.id}">
+                <span class="who-emoji">${x.emoji}</span><b>${esc(x.name)}</b><span class="muted small">уровень ${xlv.level} · ${esc(xlv.rank)}</span>
+              </button>`;
+          })
+          .join('')}
+      </div>
+      <p class="muted small">У каждого свой прогресс, серия и повторения. Сейчас: <b>${esc(me.name)}</b>. <button type="button" class="link-btn" id="who-rename">✏️ Изменить имя и значок</button></p>
+    </section>
     <section class="card level-card">
       <div class="level-badge">${lv.level}</div>
       <div>
@@ -2431,8 +2449,9 @@ function profileView() {
         .join('')}
     </div>
     <div class="card" id="sync-card">
-      <h2>Синхронизация iPhone ↔ ноутбук</h2>
-      <div id="sync-body"><p class="muted">Проверяю сервер…</p></div>
+      <h2>☁️ Синхронизация телефона и ноутбука</h2>
+      <div id="gh-body"></div>
+      <div id="sync-body"></div>
     </div>
     <div class="card">
       <h2>Lichess</h2>
@@ -2462,6 +2481,15 @@ function profileView() {
     </div>
     <p class="muted small center">Доска и фигуры — chessground (Lichess) · правила — chess.js</p>`;
 
+  app.querySelectorAll('[data-profile]').forEach((b) => {
+    b.onclick = () => {
+      store.switchProfile(b.dataset.profile);
+      toast(`${store.activeProfile().emoji} Теперь занимается: <b>${esc(store.activeProfile().name)}</b>`);
+      profileView();
+    };
+  });
+  app.querySelector('#who-rename').onclick = () => renameProfileModal();
+  renderGithubSync();
   app.querySelectorAll('[data-set]').forEach((el) =>
     el.addEventListener('change', () => store.saveSettings({ [el.dataset.set]: el.checked })),
   );
@@ -2545,17 +2573,147 @@ function profileView() {
   showVersionStatus();
 }
 
+// Синхронизация через приватный гист GitHub — работает и на GitHub Pages, без своего сервера.
+function renderGithubSync() {
+  const el = document.getElementById('gh-body');
+  if (!el) return;
+  const st = store.syncState;
+  if (!store.settings.githubToken) {
+    el.innerHTML = `
+      <p>Прогресс <b>всех профилей</b> хранится в твоём приватном гисте на GitHub (маленький закрытый файл) — телефон и ноутбук сами обмениваются им. Свой сервер не нужен.</p>
+      <ol class="small">
+        <li><a href="${store.GITHUB_TOKEN_URL}" target="_blank" rel="noopener">Создай токен GitHub</a> — галочка <b>gist</b> уже стоит, больше ничего не нужно. В «Expiration» выбери «No expiration», нажми «Generate token».</li>
+        <li>Скопируй токен (начинается с <code>ghp_</code>) и вставь сюда:</li>
+      </ol>
+      <div class="row">
+        <input class="input" id="gh-token" type="password" placeholder="ghp_…" autocomplete="off">
+        <button type="button" class="btn primary" id="gh-connect">Подключить</button>
+      </div>
+      <p class="muted small">3. Потом здесь же появится ссылка и QR-код — открой их на телефоне, и он подключится сам.</p>`;
+    el.querySelector('#gh-connect').onclick = async () => {
+      const token = el.querySelector('#gh-token').value.trim();
+      if (!token) return toast('Вставь токен GitHub');
+      const ok = await store.connectGithub(token);
+      if (!ok) {
+        toast(`❌ ${esc(store.syncState.message)}`, '', 6000);
+        store.disconnectGithub();
+      } else toast('✅ GitHub подключён — прогресс сохранён в приватном гисте');
+      renderGithubSync();
+    };
+    return;
+  }
+  el.innerHTML = `
+    <p>✅ Подключено через GitHub. <span class="muted small" id="gh-status">${esc(st.message || '')}</span></p>
+    <div class="row">
+      <button type="button" class="btn" id="gh-now">🔄 Синхронизировать сейчас</button>
+      <button type="button" class="btn primary" id="gh-pair">📱 Подключить телефон</button>
+    </div>
+    <p class="muted small">Обмен идёт сам: при открытии приложения и через пару секунд после каждого занятия. <button type="button" class="link-btn" id="gh-off">Отключить на этом устройстве</button></p>`;
+  el.querySelector('#gh-now').onclick = async () => {
+    await store.pull();
+    toast(store.syncState.status === 'error' ? `❌ ${esc(store.syncState.message)}` : '✅ Синхронизировано');
+    profileView();
+  };
+  el.querySelector('#gh-pair').onclick = pairModal;
+  el.querySelector('#gh-off').onclick = () => {
+    store.disconnectGithub();
+    renderGithubSync();
+  };
+}
+
+// Ссылка для другого устройства: токен и чей это телефон. Часть после # не уходит на сервер сайта.
+function pairLink(profileId) {
+  return `${location.origin}${location.pathname}#/link/${encodeURIComponent(store.settings.githubToken)}/${profileId}`;
+}
+
+function qrSvg(text) {
+  const q = qrcode(0, 'M');
+  q.addData(text);
+  q.make();
+  return q.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+}
+
+function pairModal() {
+  modal(`
+    <h2>📱 Подключить телефон</h2>
+    <p>Наведи камеру телефона на QR-код того, кто будет заниматься на этом телефоне, или отправь себе ссылку (например, в Telegram) и открой её на телефоне.</p>
+    <div class="pair-list">
+      ${store.profiles.list
+        .map(
+          (x) => `<div class="pair-item">
+            <b>${x.emoji} Телефон для: ${esc(x.name)}</b>
+            <div class="qr">${qrSvg(pairLink(x.id))}</div>
+            <button type="button" class="btn tiny" data-copy="${x.id}">📋 Скопировать ссылку</button>
+          </div>`,
+        )
+        .join('')}
+    </div>
+    <p class="muted small">⚠️ Не пересылай ссылку другим людям: в ней ключ доступа к твоим гистам на GitHub. Если ссылка попала не туда — удали токен на GitHub (Settings → Developer settings → Tokens) и создай новый.</p>
+    <button type="button" class="btn" data-close>Готово</button>`);
+  document.querySelectorAll('[data-copy]').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(pairLink(b.dataset.copy));
+        toast('📋 Ссылка скопирована — открой её на телефоне');
+      } catch {
+        window.prompt('Скопируй ссылку:', pairLink(b.dataset.copy));
+      }
+    };
+  });
+}
+
+// Открыли ссылку с другого устройства: подключаем GitHub и выбираем профиль.
+async function linkDevice(token, profileId) {
+  history.replaceState(null, '', '#/profile');
+  renderTopbar({ title: 'Подключение' });
+  renderTabbar(null);
+  app.innerHTML = '<section class="card"><h2>☁️ Подключаю синхронизацию…</h2><p class="muted">Загружаю прогресс с GitHub.</p></section>';
+  const ok = await store.connectGithub(decodeURIComponent(token || ''));
+  if (profileId) store.switchProfile(profileId);
+  if (ok) toast(`✅ Устройство подключено. Занимается: <b>${esc(store.activeProfile().name)}</b>`, '', 5000);
+  else {
+    toast(`❌ ${esc(store.syncState.message)}`, '', 6000);
+    store.disconnectGithub();
+  }
+  route();
+}
+
+function renameProfileModal() {
+  const me = store.activeProfile();
+  let emoji = me.emoji;
+  const { close } = modal(`
+    <h2>✏️ Имя и значок</h2>
+    <div class="row"><input class="input" id="rn-name" maxlength="24" value="${esc(me.name)}" autocomplete="off"></div>
+    <div class="emoji-pick">${store.AVATARS.map((e) => `<button type="button" class="emoji-btn ${e === emoji ? 'on' : ''}" data-emoji="${e}">${e}</button>`).join('')}</div>
+    <div class="row">
+      <button type="button" class="btn primary" id="rn-save">Сохранить</button>
+      <button type="button" class="btn" data-close>Отмена</button>
+    </div>`);
+  document.querySelectorAll('[data-emoji]').forEach((b) => {
+    b.onclick = () => {
+      emoji = b.dataset.emoji;
+      document.querySelectorAll('[data-emoji]').forEach((x) => x.classList.toggle('on', x === b));
+    };
+  });
+  document.querySelector('#rn-save').onclick = () => {
+    store.renameProfile(me.id, document.querySelector('#rn-name').value, emoji);
+    close();
+    profileView();
+  };
+}
+
 async function renderSync() {
   const el = document.getElementById('sync-body');
   if (!el) return;
   const ok = await store.checkServer();
   if (!el.isConnected) return;
   if (!ok) {
-    el.innerHTML = `<p class="muted">Синхронизация работает, когда приложение запущено на твоём сервере (server.js). Сейчас прогресс хранится только на этом устройстве — можно перенести его через «Резервную копию».</p>`;
+    el.innerHTML = '';
     return;
   }
   el.innerHTML = `
-    <p class="muted">Придумай секретную фразу и введи её одинаково на iPhone и на ноутбуке — прогресс будет общим.</p>
+    <h3>Или через свой сервер</h3>
+    <p class="muted">Придумай секретную фразу и введи её одинаково на iPhone и на ноутбуке — прогресс текущего профиля будет общим.</p>
     <div class="row">
       <input class="input" id="sync-key" type="password" placeholder="Секретная фраза (от 8 символов)" value="${esc(store.settings.syncKey)}" autocomplete="off">
       <button class="btn primary" id="sync-save">Синхронизировать</button>
@@ -2774,6 +2932,8 @@ function route() {
       return quizView();
     case 'free':
       return freeView();
+    case 'link':
+      return linkDevice(id, extra);
     case 'theory':
       return theoryView();
     case 'profile':
@@ -2859,10 +3019,27 @@ store.onChange(() => {
   if (!tabbar.hidden) renderTabbar(view === 'home' ? 'home' : view);
 });
 
+// Синхронизация с другим устройством; если пришёл новый прогресс — обновляем экраны со сводкой.
+function syncAndRefresh() {
+  const before = JSON.stringify(store.progress) + store.profiles.active;
+  store.pull().then(() => {
+    const changed = JSON.stringify(store.progress) + store.profiles.active !== before;
+    if (changed && ['home', 'review', 'profile'].includes(document.body.dataset.view) && !document.querySelector('.modal-wrap')) route();
+  });
+}
+
 route();
-store.pull();
+syncAndRefresh();
 checkForUpdate();
-document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && checkForUpdate());
+let lastPull = Date.now();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  checkForUpdate();
+  if (Date.now() - lastPull > 30000) {
+    lastPull = Date.now();
+    syncAndRefresh();
+  }
+});
 
 // Офлайн-режим. В некоторых встроенных окнах service worker запрещён — тогда просто работаем без него.
 // Когда на сайте появилась новая версия, новый service worker берёт управление —

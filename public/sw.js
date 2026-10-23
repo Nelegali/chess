@@ -1,6 +1,6 @@
 // Офлайн-режим: файлы приложения кэшируются, обновления подтягиваются в фоне.
 // VERSION совпадает с версией приложения (js/version.js) — при выпуске обновления меняй обе.
-const VERSION = '1.11.0';
+const VERSION = '1.12.0';
 const CACHE = `chess-openings-${VERSION}`;
 const SHELL = [
   './',
@@ -21,6 +21,7 @@ const SHELL = [
   'data/popularity.json',
   'vendor/chess.js',
   'vendor/chessground.js',
+  'vendor/qrcode.js',
   'vendor/chessground.base.css',
   'vendor/chessground.brown.css',
   'vendor/chessground.cburnett.css',
