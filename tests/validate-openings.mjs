@@ -99,9 +99,24 @@ if (versionJson !== APP_VERSION || swVersion !== APP_VERSION) {
   errors.push(`версии не совпадают: version.js=${APP_VERSION}, version.json=${versionJson}, sw.js=${swVersion}`);
 }
 
+// Встроенная статистика популярности: файл на месте, ходы легальны, начальная позиция есть.
+const pop = JSON.parse(readFileSync(new URL('../public/data/popularity.json', import.meta.url), 'utf8'));
+const popPositions = Object.entries(pop.positions || {});
+if (!pop.games || !popPositions.length) errors.push('popularity.json: пустая статистика');
+if (!pop.positions[new Chess().fen().split(' ').slice(0, 4).join(' ')]) errors.push('popularity.json: нет начальной позиции');
+for (const [key, rows] of popPositions) {
+  const c = new Chess(`${key} 0 1`);
+  const total = rows[rows.length - 1][1];
+  for (const [san, n, w, d, b] of rows.slice(0, -1)) {
+    if (!c.moves().includes(san)) errors.push(`popularity.json: ход ${san} нелегален в позиции ${key}`);
+    if (n !== w + d + b || n > total) errors.push(`popularity.json: неверные числа у ${san} в позиции ${key}`);
+  }
+}
+
 if (errors.length) {
   console.error(errors.join('\n'));
   console.error(`\n✗ ошибок: ${errors.length}`);
   process.exit(1);
 }
 console.log(`✓ версия ${APP_VERSION}; ${OPENINGS.length} дебютов, ${lines} линий, ${moves} ходов, ${altCount} ручных пояснений — всё легально`);
+console.log(`✓ встроенная статистика: ${popPositions.length} позиций из ${pop.games} партий — ходы легальны`);

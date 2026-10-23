@@ -4,6 +4,7 @@ import { Board, Chess, parseArrows, threatArrows, sanToMove, moveLabel, figurine
 import { Chessground } from '../vendor/chessground.js';
 import { play as sound } from './sound.js';
 import * as lichess from './lichess.js';
+import { moveStats } from './popularity.js';
 import { BASICS, GLOSSARY, GLOSSARY_BY_ID, OPENING_THEORY, DIAGRAMS, linkTerms } from './theory.js';
 import * as coach from './coach.js';
 import { APP_VERSION, APP_DATE } from './version.js';
@@ -900,15 +901,15 @@ function learnView(lineId) {
     el.innerHTML = '<p class="muted">Загружаю статистику…</p>';
     const theory = alt ? alt.moves[alt.ply] : moves[ply];
     try {
-      const data = await lichess.explorer(uciHistory());
+      const data = await moveStats(uciHistory(), currentFen());
       if (!el.isConnected) return;
-      const total = data.white + data.draws + data.black;
+      const total = data.total;
       if (!total) {
         el.innerHTML = '<p class="muted">В базе Lichess таких партий почти нет — позиция редкая.</p>';
         return;
       }
       el.innerHTML = `
-        <p class="muted">Партии игроков 1400–2000 на Lichess: ${total.toLocaleString('ru-RU')}${data.opening ? ` · ${esc(data.opening.name)}` : ''}</p>
+        <p class="muted">${statsSourceText(data, total)}${data.opening ? ` · ${esc(data.opening.name)}` : ''}</p>
         <table class="ex-table">
           ${data.moves
             .map((m) => {
@@ -925,8 +926,11 @@ function learnView(lineId) {
             })
             .join('')}
         </table>
-        <p class="muted small">★ — ход по нашей теории. Полоска: победы белых / ничьи / победы чёрных. Наведи на ход — покажу его на доске, нажми — разберу.</p>`;
+        <p class="muted small">★ — ход по нашей теории. Полоска: победы белых / ничьи / победы чёрных. Наведи на ход — покажу его на доске, нажми — разберу.</p>
+        ${data.lichessError ? '<p class="muted small">Свежая статистика Lichess (игроки 1400–2000): <button type="button" class="link-btn" id="ex-help-btn">подключить</button></p><div id="ex-help"></div>' : ''}`;
       bindExplorerRows(el, theory);
+      const helpBtn = el.querySelector('#ex-help-btn');
+      if (helpBtn) helpBtn.onclick = () => renderExplorerHelp(el.querySelector('#ex-help'), data.lichessError, currentFen(), side, loadExplorer);
     } catch (e) {
       if (el.isConnected) renderExplorerHelp(el, e, currentFen(), side, loadExplorer);
     }
@@ -1152,6 +1156,13 @@ function learnView(lineId) {
 }
 
 // Что показать, если статистика Lichess не загрузилась.
+// Откуда проценты: живая статистика Lichess или встроенная (20 тыс. партий с Lichess).
+function statsSourceText(data, total) {
+  return data.source === 'local'
+    ? `Встроенная статистика: в ${total.toLocaleString('ru-RU')} ${plural(total, 'партии', 'партиях', 'партиях')} с Lichess из этой позиции`
+    : `Партии игроков 1400–2000 на Lichess: ${total.toLocaleString('ru-RU')}`;
+}
+
 async function renderExplorerHelp(el, e, fen, side, retry) {
   const hasToken = !!store.settings.lichessToken;
   const onServer = await store.checkServer();
@@ -1803,7 +1814,7 @@ function freeView() {
     const rows = [];
     let total = 0;
     if (ex && ex.data) {
-      total = ex.data.white + ex.data.draws + ex.data.black;
+      total = ex.data.total;
       for (const m of ex.data.moves) {
         const n = m.white + m.draws + m.black;
         if (n) rows.push({ san: m.san, n, w: m.white, d: m.draws, b: m.black, book: book.get(m.san) });
@@ -1856,19 +1867,21 @@ function freeView() {
   function candidatesHtml(rows, mine) {
     const turn = turnAt(fen());
     const ex = explorerData.get(fen());
+    const total = ex && ex.data ? ex.data.total : 0;
     const title = mine
       ? `💡 Что здесь чаще играют ${sideName(turn)}`
       : `Выбери ответ соперника (${turn === 'w' ? 'белые' : 'чёрные'}):`;
     const loading = ex === 'loading' ? '<p class="muted small">Загружаю статистику Lichess…</p>' : '';
     const noStats =
       ex && ex.error
-        ? `<p class="muted small">Проценты популярности берутся из статистики Lichess — сейчас она недоступна. <button type="button" class="link-btn" id="ex-help-btn">Подключить</button></p><div id="ex-help"></div>`
+        ? `<p class="muted small">Для этой позиции нет встроенной статистики, а статистика Lichess недоступна. <button type="button" class="link-btn" id="ex-help-btn">Подключить Lichess</button></p><div id="ex-help"></div>`
         : '';
     const list = rows.length
       ? rows
           .map((r, k) => {
             const n = r.n || 0;
-            const pct = r.share != null ? `${Math.round(r.share * 100)}%` : '';
+            // ход из базы, которого нет среди самых частых, — значит, его играют редко
+            const pct = r.share != null ? `${Math.max(1, Math.round(r.share * 100))}%` : total ? 'редко' : '';
             const bar = n
               ? `<span class="wdb"><i class="w" style="width:${(r.w / n) * 100}%"></i><i class="d" style="width:${(r.d / n) * 100}%"></i><i class="b" style="width:${(r.b / n) * 100}%"></i></span>`
               : '';
@@ -1886,7 +1899,8 @@ function freeView() {
     return `<div class="cands">
         <div class="cands-title">${title}</div>
         ${list}
-        ${rows.some((r) => r.n) ? '<p class="muted small">% — как часто так играют на Lichess (игроки 1400–2000). Полоска: победы белых / ничьи / победы чёрных. ★ — ход из нашей базы.</p>' : ''}
+        ${rows.some((r) => r.n) ? `<p class="muted small">% — как часто так играют: ${ex.data.source === 'local' ? `встроенная статистика по ${ex.data.total.toLocaleString('ru-RU')} ${plural(ex.data.total, 'партии', 'партиям', 'партиям')} с Lichess` : 'Lichess, игроки 1400–2000'}. Полоска: победы белых / ничьи / победы чёрных. ★ — ход из нашей базы.</p>` : ''}
+        ${ex && ex.data && ex.data.lichessError ? '<p class="muted small">Свежая статистика Lichess: <button type="button" class="link-btn" id="ex-help-btn">подключить</button></p><div id="ex-help"></div>' : ''}
         ${loading}${noStats}
         ${mine ? '' : '<p class="muted small">Можно и самому передвинуть фигуру соперника на доске.</p>'}
       </div>`;
@@ -1896,8 +1910,7 @@ function freeView() {
     const f = fen();
     if (explorerData.has(f)) return;
     explorerData.set(f, 'loading');
-    lichess
-      .explorer(moves.slice(0, cursor).map(uci))
+    moveStats(moves.slice(0, cursor).map(uci), f)
       .then((data) => explorerData.set(f, { data }))
       .catch((error) => explorerData.set(f, { error }))
       .finally(() => {
@@ -1986,7 +1999,8 @@ function freeView() {
     if (help)
       help.onclick = () => {
         const f = fen();
-        renderExplorerHelp(q('#ex-help'), explorerData.get(f).error, f, side, () => {
+        const ex = explorerData.get(f);
+        renderExplorerHelp(q('#ex-help'), ex.error || ex.data.lichessError, f, side, () => {
           explorerData.clear();
           render();
         });
