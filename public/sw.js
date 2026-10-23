@@ -1,6 +1,6 @@
 // Офлайн-режим: файлы приложения кэшируются, обновления подтягиваются в фоне.
 // VERSION совпадает с версией приложения (js/version.js) — при выпуске обновления меняй обе.
-const VERSION = '1.8.0';
+const VERSION = '1.8.1';
 const CACHE = `chess-openings-${VERSION}`;
 const SHELL = [
   './',

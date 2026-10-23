@@ -107,6 +107,9 @@ function buildLine(steps, startFen) {
 
 const turnAt = (fen) => fen.split(' ')[1];
 
+// Мини-доски тоже умеют подсвечивать клетки и пути, когда в тексте рядом нажали «f7» или «h4–e1».
+const boardAdapters = new WeakMap();
+
 function miniBoard(el, fen, orientation, lastMove, shapes = [], coordinates = false) {
   const cg = Chessground(el, {
     fen,
@@ -118,7 +121,25 @@ function miniBoard(el, fen, orientation, lastMove, shapes = [], coordinates = fa
     drawable: { enabled: false, visible: true, autoShapes: shapes },
   });
   requestAnimationFrame(() => cg.redrawAll());
-  onCleanup(() => cg.destroy());
+  let timer;
+  const show = (extra, ms) => {
+    clearTimeout(timer);
+    cg.setAutoShapes([...shapes, ...extra]);
+    timer = setTimeout(() => el.isConnected && cg.setAutoShapes(shapes), ms);
+  };
+  boardAdapters.set(el, {
+    el,
+    flash: (squares) => show(squares.map((sq) => ({ orig: sq, brush: 'blue' })), 1800),
+    flashPath: (path) =>
+      show(
+        path.slice(1).map((sq, i) => ({ orig: path[i], dest: sq, brush: 'blue' })),
+        2200,
+      ),
+  });
+  onCleanup(() => {
+    clearTimeout(timer);
+    cg.destroy();
+  });
   return cg;
 }
 
@@ -448,6 +469,8 @@ function openingView(id) {
       </div>
     </section>`;
   miniBoard(app.querySelector('#hero'), fen, colorName(o.side), lastMove);
+  // На странице дебюта клетки из текста подсвечиваются на доске вверху.
+  activeBoard = boardAdapters.get(app.querySelector('#hero'));
   mountDiagrams(app);
 }
 
@@ -1974,18 +1997,36 @@ window.addEventListener('hashchange', route);
 // На компьютере клетка подсвечивается уже при наведении мыши.
 document.addEventListener('mouseover', (e) => {
   const sq = e.target.closest && e.target.closest('.sq');
-  if (sq && activeBoard) flashSquareLink(sq);
+  if (sq) flashSquareLink(sq, false);
 });
 
-function flashSquareLink(el) {
-  if (el.dataset.path) activeBoard.flashPath(el.dataset.path.split(','));
-  else activeBoard.flash([el.dataset.sq]);
+// Какой доске показывать клетку: схеме в том же разделе (теория, карточка варианта),
+// иначе — главной доске экрана.
+function targetBoardFor(link) {
+  const scope = link.closest('.wn-item, .ex-detail, .diagram, details, .modal');
+  if (scope) {
+    const el = [...scope.querySelectorAll('.cg-wrap')].find((x) => boardAdapters.has(x));
+    if (el) return boardAdapters.get(el);
+  }
+  return activeBoard;
+}
+
+function flashSquareLink(link, scrollToBoard) {
+  const target = targetBoardFor(link);
+  if (!target) return;
+  if (link.dataset.path) target.flashPath(link.dataset.path.split(','));
+  else target.flash([link.dataset.sq]);
+  // Если доска ушла за край экрана — прокручиваем к ней, чтобы было видно подсветку.
+  if (scrollToBoard && target.el) {
+    const r = target.el.getBoundingClientRect();
+    if (r.bottom < 60 || r.top > innerHeight - 60) target.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 }
 // Повторное нажатие на ссылку текущей страницы (например, вкладку «Викторина» после результата)
 // не меняет адрес, поэтому перерисовываем вручную.
 document.addEventListener('click', (e) => {
   const sq = e.target.closest('.sq');
-  if (sq && activeBoard) flashSquareLink(sq);
+  if (sq) flashSquareLink(sq, true);
   const term = e.target.closest('.term');
   if (term) {
     e.preventDefault();
