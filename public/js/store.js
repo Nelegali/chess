@@ -310,17 +310,58 @@ export function openingStatus(opening) {
   return 'learning';
 }
 
-// Что учить дальше: первый не начатый вариант, от простого к сложному.
+// Что учить дальше — как посоветовал бы тренер:
+// 1) доучить начатый дебют (его другие варианты);
+// 2) то, что продолжает уже знакомые ходы (общее начало от 5 полуходов) — например, ловушки в этом дебюте;
+// 3) иначе — за тот цвет, за который знаешь меньше вариантов.
+// Внутри каждого шага — сначала проще, потом популярнее. reason — объяснение для главной.
+const SHARED_PLIES = 5;
+const plainSans = (line) => line.steps.map((s) => s.m.replace(/[!?]+$/, ''));
+// «Итальянская партия», но Атака «жареной печени» — без двойных кавычек
+const quoted = (name) => (name.includes('«') ? name : `«${name}»`);
+
 export function suggestNext() {
-  const candidates = [];
-  for (const o of OPENINGS) {
-    for (const l of o.lines) {
-      if (lineStatus(l.id) === 'none') candidates.push({ opening: o, line: l });
-    }
-  }
+  const lines = allLines();
+  const started = lines.filter(({ line }) => lineStatus(line.id) !== 'none');
+  const count = { w: 0, b: 0 };
+  for (const x of started) count[lineSide(x.opening, x.line)]++;
+  const weaker = count.w === count.b ? null : count.w < count.b ? 'w' : 'b';
+  const known = started.map((x) => ({ x, sans: plainSans(x.line) }));
+
+  const candidates = lines
+    .filter(({ line }) => lineStatus(line.id) === 'none')
+    .map((c) => {
+      const side = lineSide(c.opening, c.line);
+      const sans = plainSans(c.line);
+      let shared = 0;
+      let from = null;
+      for (const k of known) {
+        let n = 0;
+        while (n < sans.length && n < k.sans.length && sans[n] === k.sans[n]) n++;
+        // при равенстве ссылаемся на обычный дебют, а не на ловушку
+        if (n > shared || (n === shared && n > 0 && from.opening.category === 'trap' && k.x.opening.category !== 'trap')) [shared, from] = [n, k.x];
+      }
+      const sameOpening = started.some((x) => x.opening === c.opening);
+      const step = sameOpening ? 0 : shared >= SHARED_PLIES ? 1 : 2;
+      const forSide = side === 'w' ? 'за белых' : 'за чёрных';
+      const reason =
+        step === 0
+          ? `доучим ${quoted(c.opening.name)} до конца — это его следующий вариант`
+          : step === 1
+            ? `продолжение того, что ты уже знаешь: начинается как ${quoted(from.opening.name)}${lineSide(from.opening, from.line) !== side ? `, только теперь ${forSide}` : ''}`
+            : !started.length
+              ? 'самый простой и популярный дебют, с него удобно начать'
+              : side === weaker
+                ? `за ${side === 'w' ? 'белых' : 'чёрных'} ты знаешь меньше вариантов — пора добавить`
+                : 'следующий по сложности и популярности';
+      return { ...c, side, step, balance: side === weaker ? 0 : 1, reason };
+    });
   candidates.sort(
     (a, b) =>
+      a.step - b.step ||
+      (a.step === 2 ? a.balance - b.balance : 0) ||
       a.opening.difficulty - b.opening.difficulty ||
+      a.balance - b.balance ||
       b.opening.popularity - a.opening.popularity ||
       a.opening.lines.indexOf(a.line) - b.opening.lines.indexOf(b.line),
   );

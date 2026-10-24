@@ -78,6 +78,15 @@ store.progress.cards['scotch-mieses'].due = store.today(-3);
 const due = store.dueLines().map((x) => x.line.id);
 check('к повторению: сначала самые просроченные', due[0] === 'scotch-mieses' && due[1] === 'london-main');
 
+// Что учить дальше: сначала доучить начатый дебют, потом то, что продолжает знакомые ходы
+store.resetProgress();
+check('для новичка «Учить» начинается с Итальянской партии', store.suggestNext().line.id === 'italian-pianissimo');
+store.markLearned('italian-pianissimo');
+check('после первого варианта — второй вариант того же дебюта', store.suggestNext().line.id === 'italian-vs-two-knights');
+store.markLearned('italian-vs-two-knights');
+const after = store.suggestNext();
+check('после Итальянской — продолжение тех же ходов, а не Лондонская система', after.opening.id !== 'london' && after.step === 1 && /Итальянская/.test(after.reason));
+
 // Журнал занятий: урок, тренировка, викторина и достижения записываются с временем
 store.resetProgress();
 store.markLearned('london-main');

@@ -424,6 +424,8 @@ function homeView() {
   const tx = store.todayXp();
   const s = store.streak();
 
+  // почему предлагаем именно этот дебют
+  const nextWhy = next ? `<p class="next-why muted small">💡 ${due.length ? 'Новое' : 'Почему этот'}: ${esc(next.reason)}. Можно выбрать и любой другой дебют ниже.</p>` : '';
   const mainAction = due.length
     ? `<a class="btn primary big" href="#/review">🔁 Повторить ${due.length} ${plural(due.length, 'вариант', 'варианта', 'вариантов')}</a>`
     : next
@@ -445,11 +447,13 @@ function homeView() {
       </div>
       <div class="actions">
         ${mainAction}
+        ${next && !due.length ? nextWhy : ''}
         <div class="row">
           ${due.length && next ? `<a class="btn" href="#/learn/${next.line.id}">📖 Новое</a>` : ''}
           <a class="btn" href="#/quiz">❓ Викторина</a>
           <a class="btn" href="#/free">♟ Свободная игра</a>
         </div>
+        ${next && due.length ? nextWhy : ''}
         <a class="basics-link" href="#/theory">📚 Новичок? Как ходят фигуры, как читать ходы и что значат названия дебютов →</a>
       </div>
     </section>
