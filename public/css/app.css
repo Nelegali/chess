@@ -3215,3 +3215,18 @@ cg-board square.mark-lost {
   margin: 0 2px;
   line-height: 1.35;
 }
+.gh-steps {
+  padding-left: 20px;
+  font-size: 0.92rem;
+}
+.gh-steps li {
+  margin-bottom: 8px;
+}
+.gh-token-btn {
+  display: flex;
+  margin-top: 6px;
+  width: max-content;
+  max-width: 100%;
+  font-weight: 700;
+  border: 2px solid var(--text);
+}

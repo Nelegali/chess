@@ -2989,20 +2989,26 @@ function renderGithubSync() {
   const st = store.syncState;
   if (!store.settings.githubToken) {
     el.innerHTML = `
-      <p>Прогресс <b>всех профилей</b> хранится в твоём приватном гисте на GitHub (маленький закрытый файл) — телефон и ноутбук сами обмениваются им. Свой сервер не нужен.</p>
-      <ol class="small">
-        <li><a href="${store.GITHUB_TOKEN_URL}" target="_blank" rel="noopener">Создай токен GitHub</a> — галочка <b>gist</b> уже стоит, больше ничего не нужно. В «Expiration» выбери «No expiration», нажми «Generate token».</li>
-        <li>Скопируй токен (начинается с <code>ghp_</code>) и вставь сюда:</li>
+      <p>Прогресс <b>всех профилей</b> хранится в твоём приватном гисте на GitHub (маленький закрытый файл) — телефон и ноутбук сами обмениваются им. Свой сервер не нужен. Настраивается один раз, удобнее на ноутбуке.</p>
+      <ol class="gh-steps">
+        <li>Нажми кнопку — откроется GitHub (если попросит, войди в свой аккаунт):
+          <a class="btn gh-token-btn" href="${store.GITHUB_TOKEN_URL}" target="_blank" rel="noopener">🔑 Создать токен на GitHub ↗</a></li>
+        <li>На странице GitHub всё уже заполнено: в «Note» — название, в списке прав отмечена галочка <b>gist</b>. Поменяй только <b>Expiration</b> → <b>No expiration</b> (чтобы не истёк), прокрути вниз и нажми зелёную <b>Generate token</b>.</li>
+        <li>GitHub покажет токен — строчку, которая начинается с <code>ghp_</code>. Нажми значок 📋 рядом, чтобы скопировать (второй раз её не покажут).</li>
+        <li>Вернись сюда, вставь токен в поле и нажми «Подключить»:</li>
       </ol>
       <div class="row">
-        <input class="input" id="gh-token" type="password" placeholder="ghp_…" autocomplete="off">
+        <input class="input" id="gh-token" type="password" placeholder="ghp_… или ссылка подключения" autocomplete="off">
         <button type="button" class="btn primary" id="gh-connect">Подключить</button>
       </div>
-      <p class="muted small">3. Потом здесь же появится ссылка и QR-код — открой их на телефоне, и он подключится сам.</p>`;
+      <p class="muted small">Потом здесь появится кнопка «📱 Подключить телефон» с QR-кодом — наведи на него камеру телефона, и он подключится сам. Если на телефоне приложение установлено на экран «Домой», QR откроется в Safari, а не в приложении — тогда скопируй ссылку подключения, открой приложение → Профиль и вставь её в это поле.</p>`;
     el.querySelector('#gh-connect').onclick = async () => {
-      const token = el.querySelector('#gh-token').value.trim();
-      if (!token) return toast('Вставь токен GitHub');
-      const ok = await store.connectGithub(token);
+      const value = el.querySelector('#gh-token').value.trim();
+      if (!value) return toast('Вставь токен GitHub');
+      // вставили ссылку подключения с другого устройства — берём из неё токен и профиль
+      const link = value.match(/#\/link\/([^/\s]+)(?:\/([\w-]+))?/);
+      if (link) return linkDevice(link[1], link[2]);
+      const ok = await store.connectGithub(value);
       if (!ok) {
         toast(`❌ ${esc(store.syncState.message)}`, '', 6000);
         store.disconnectGithub();
@@ -3046,6 +3052,7 @@ function pairModal() {
   modal(`
     <h2>📱 Подключить телефон</h2>
     <p>Наведи камеру телефона на QR-код того, кто будет заниматься на этом телефоне, или отправь себе ссылку (например, в Telegram) и открой её на телефоне.</p>
+    <p class="muted small">📲 Приложение установлено на экран «Домой» на iPhone? Тогда QR и ссылка откроются в Safari, а у установленного приложения своя память. Скопируй ссылку, открой приложение → Профиль → «Синхронизация», вставь ссылку в поле и нажми «Подключить».</p>
     <div class="pair-list">
       ${store.profiles.list
         .map(
