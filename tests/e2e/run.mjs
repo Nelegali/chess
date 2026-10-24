@@ -5,11 +5,14 @@
 // Нужен Playwright с Chromium: npm install && npx playwright install chromium
 // Скриншоты — в tests/e2e/out/.
 import { spawn } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { mkdirSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const root = fileURLToPath(new URL('../../', import.meta.url));
+// сценарии запускаются из папки out/ — туда же попадают скриншоты с относительным путём
+const OUT = fileURLToPath(new URL('./out/', import.meta.url));
+mkdirSync(OUT, { recursive: true });
 const PORT = process.env.E2E_PORT || '8099';
 const external = !!process.env.BASE_URL;
 const BASE = process.env.BASE_URL || `http://localhost:${PORT}/`;
@@ -46,7 +49,7 @@ if (!external) {
 function run(name) {
   return new Promise((resolve) => {
     const started = Date.now();
-    const child = spawn(process.execPath, [`${here}${name}.mjs`], { cwd: here, env: { ...process.env, BASE_URL: BASE } });
+    const child = spawn(process.execPath, [`${here}${name}.mjs`], { cwd: OUT, env: { ...process.env, BASE_URL: BASE } });
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (out += d));

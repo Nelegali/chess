@@ -44,10 +44,10 @@ for (const [name, dev] of [['phone', devices['iPhone 13']], ['desk', { viewport:
   if (name === 'phone') console.log(JSON.stringify(info, null, 1));
   await p.evaluate(() => document.querySelector('#history').scrollIntoView());
   await p.waitForTimeout(300);
-  await p.screenshot({ path: `hist-${name}.png` });
+  await p.screenshot({ path: `${OUT}/hist-${name}.png` });
   await p.evaluate(() => document.querySelector('#done-lines').scrollIntoView());
   await p.waitForTimeout(300);
-  await p.screenshot({ path: `hist-${name}-done.png` });
+  await p.screenshot({ path: `${OUT}/hist-${name}-done.png` });
   // нажатие на день в календаре
   await p.evaluate(() => document.querySelector('.heat').scrollIntoView());
   await p.click(`.heat i[data-day="${day(9)}"]`);
