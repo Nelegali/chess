@@ -127,6 +127,8 @@ public/data/popularity.json встроенная статистика ходов
 public/sw.js           офлайн-режим
 tools/                 сборка встроенной статистики из набора партий
 tests/                 проверка базы дебютов, статистики и логики прогресса
+tests/e2e/             браузерные сценарии на Playwright: npm run e2e (нужно npm install && npx playwright install chromium)
+CLAUDE.md              заметки для Claude Code: устройство проекта, команды, выпуск версии, подводные камни
 ```
 
 ## Лицензии

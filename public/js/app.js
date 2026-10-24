@@ -2094,7 +2094,8 @@ function freeView() {
     // Ни статистики, ни теории (например, без токена Lichess и после выхода из базы) —
     // предлагаем разумные ходы по оценке тренера, чтобы партию можно было продолжить.
     if (!rows.length && ex && ex !== 'loading' && !(ex.data && ex.data.moves.length)) {
-      for (const m of sensibleMoves(f)) rows.push({ san: m.san, coachPick: true });
+      const picks = sensibleMoves(f);
+      for (const m of picks) rows.push({ san: m.san, coachPick: picks.leastBad ? 'least-bad' : true });
     }
     // «результат» — сколько очков набирал тот, кто так сыграл (победа — 1, ничья — ½); только если партий хватает
     const mover = turnAt(f);
@@ -2162,11 +2163,12 @@ function freeView() {
   function sensibleMoves(f) {
     if (sensibleCache.has(f)) return sensibleCache.get(f);
     const VALUE = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+    // насколько ход плох: 0 — разумный; если разумных нет, берём наименее плохие
+    const BADNESS = { good: 0, ok: 0, lost: 1, dubious: 1, mistake: 2, blunder: 3 };
     const scored = [];
     for (const m of new Chess(f).moves({ verbose: true })) {
-      const e = coach.explain(f, m, null, {});
-      if (e.verdict !== 'ok' && e.verdict !== 'good') continue;
-      let score = 0;
+      const bad = BADNESS[coach.explain(f, m, null, {}).verdict] ?? 1;
+      let score = -100 * bad;
       if (m.flags.includes('k') || m.flags.includes('q')) score += 6; // рокировка
       if (m.captured) score += 2 + VALUE[m.captured];
       if ((m.piece === 'n' || m.piece === 'b') && (m.from[1] === '1' || m.from[1] === '8')) score += 4; // развитие
@@ -2174,10 +2176,10 @@ function freeView() {
       if (m.san.includes('+')) score += 1;
       scored.push({ m, score });
     }
-    const out = scored
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5)
-      .map((x) => x.m);
+    scored.sort((a, b) => b.score - a.score);
+    const sensible = scored.filter((x) => x.score > -50);
+    const out = (sensible.length ? sensible.slice(0, 5) : scored.slice(0, 3)).map((x) => x.m);
+    out.leastBad = !sensible.length && out.length > 0;
     sensibleCache.set(f, out);
     return out;
   }
@@ -2258,7 +2260,8 @@ function freeView() {
         ${list}
         ${rows.some((r) => r.eng) ? '<p class="muted small">🤖 Оценка движка Stockfish после хода: «+1.0 у белых» — у белых перевес примерно в лишнюю пешку, «≈ поровну» — силы равны. «Лучший ход» — самый сильный по мнению движка; в начале партии у белых обычно небольшой плюс.</p>' : ''}
         ${rows.some((r) => r.score != null) ? '<p class="muted small">🏆 % очков — как часто сыгравшие так выигрывали (ничья — пол-очка). Это практика любителей: иногда ход «выигрывает» просто из-за ошибок соперников.</p>' : ''}
-        ${rows.some((r) => r.coachPick) ? '<p class="muted small">Статистики для этой позиции нет — это ходы, которые тренер считает разумными.</p>' : ''}
+        ${rows.some((r) => r.coachPick === true) ? '<p class="muted small">Статистики для этой позиции нет — это ходы, которые тренер считает разумными.</p>' : ''}
+        ${rows.some((r) => r.coachPick === 'least-bad') ? '<p class="muted small">Статистики нет, и хороших ходов здесь не осталось — это наименее плохие.</p>' : ''}
         ${rows.some((r) => r.n) ? `<p class="muted small">% — как часто так играют: ${ex.data.source === 'local' ? `встроенная статистика по ${ex.data.total.toLocaleString('ru-RU')} ${plural(ex.data.total, 'партии', 'партиям', 'партиям')} с Lichess` : 'Lichess, игроки 1400–2000'}. Полоска: победы белых / ничьи / победы чёрных. ★ — ход из нашей базы.</p>` : ''}
         ${ex && ex.data && ex.data.lichessError ? '<p class="muted small">Свежая статистика Lichess: <button type="button" class="link-btn" id="ex-help-btn">подключить</button></p><div id="ex-help"></div>' : ''}
         ${loading}${noStats}
