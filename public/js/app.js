@@ -2631,6 +2631,118 @@ function freeView() {
 
 // ─────────────────────────── профиль ───────────────────────────
 
+// ─── история занятий в профиле ───
+
+const HIST_DAYS = 5; // сколько дней показывать сразу
+
+function dayLabel(key) {
+  if (key === store.today()) return 'Сегодня';
+  if (key === store.today(-1)) return 'Вчера';
+  const [y, m, d] = key.split('-').map(Number);
+  const text = new Date(y, m - 1, d).toLocaleDateString('ru-RU', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'long',
+    ...(y !== new Date().getFullYear() ? { year: 'numeric' } : {}),
+  });
+  return text[0].toUpperCase() + text.slice(1);
+}
+const timeOf = (t) => new Date(t).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+const shortDate = (t) => new Date(t).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+const starLine = (n) => '⭐'.repeat(n) + '☆'.repeat(3 - n);
+
+// Одна запись: что сделано, результат и время.
+function historyItem(e) {
+  let icon;
+  let title;
+  let sub = '';
+  let result = '';
+  const found = e.id && (e.k === 'learn' || e.k === 'drill') ? findLine(e.id) : null;
+  if ((e.k === 'learn' || e.k === 'drill') && !found) return '';
+  if (found) {
+    const side = lineSide(found.opening, found.line);
+    title = `${sidePill(side, side === 'w' ? 'белые' : 'чёрные')} <a href="#/o/${found.opening.id}">${esc(found.opening.name)}</a>`;
+    sub = esc(found.line.name);
+  }
+  if (e.k === 'learn') {
+    icon = '📖';
+    result = e.first ? 'изучен новый вариант' : 'урок повторён';
+  } else if (e.k === 'drill') {
+    icon = '🎯';
+    result = e.old
+      ? `последняя тренировка · память ${e.b}/${store.MAX_BOX}`
+      : `${starLine(store.starsFor(e.e))} ${e.e === 0 ? 'без ошибок' : `${e.e} ${plural(e.e, 'ошибка', 'ошибки', 'ошибок')}`} · память ${e.b}/${store.MAX_BOX}`;
+  } else if (e.k === 'quiz') {
+    icon = '❓';
+    title = '<b>Викторина</b>';
+    result = `${e.c} из ${e.n} верно${e.c === e.n ? ' — идеально!' : ''}`;
+  } else if (e.k === 'ach') {
+    const a = store.ACHIEVEMENTS.find((x) => x.id === e.id);
+    if (!a) return '';
+    icon = a.icon;
+    title = `<b>Достижение «${esc(a.name)}»</b>`;
+    result = esc(a.desc);
+  } else return '';
+  return `<div class="hist-item hk-${e.k}">
+      <span class="hi-ico">${icon}</span>
+      <div class="hi-main"><div class="hi-title">${title}</div>${sub ? `<div class="hi-sub">${sub}</div>` : ''}<div class="hi-res">${result}</div></div>
+      <div class="hi-side"><span class="hi-time">${timeOf(e.t)}</span>${e.xp ? `<span class="hi-xp">+${e.xp} XP</span>` : ''}</div>
+    </div>`;
+}
+
+function historyHtml(list, all) {
+  if (!list.length) return '<p class="muted">Пока пусто. Пройди первый урок — и здесь появится запись: что и когда пройдено.</p>';
+  const days = [];
+  for (const e of list) {
+    const key = store.dayOf(e.t);
+    if (!days.length || days.at(-1).key !== key) days.push({ key, items: [] });
+    days.at(-1).items.push(e);
+  }
+  const shown = all ? days : days.slice(0, HIST_DAYS);
+  const p = store.progress;
+  return (
+    shown
+      .map((d) => {
+        const xp = p.days[d.key] || 0;
+        return `<section class="hist-day" data-hday="${d.key}">
+          <h3><span>${dayLabel(d.key)}</span>${xp ? `<span class="hi-xp">+${xp} XP</span>` : ''}</h3>
+          ${d.items.map(historyItem).join('')}
+        </section>`;
+      })
+      .join('') +
+    (shown.length < days.length
+      ? `<button type="button" class="btn" id="hist-more">Показать всю историю (ещё ${days.length - shown.length} ${plural(days.length - shown.length, 'день', 'дня', 'дней')})</button>`
+      : '')
+  );
+}
+
+// Все начатые варианты: когда изучен, сколько тренировок, память и следующее повторение.
+function doneLinesHtml() {
+  const p = store.progress;
+  const rows = allLines()
+    .filter(({ line }) => p.learned[line.id] || p.cards[line.id])
+    .sort((a, b) => (p.learned[b.line.id] || 0) - (p.learned[a.line.id] || 0));
+  if (!rows.length) return '<p class="muted">Ещё ни одного варианта. Начни с кнопки «Учить» на главной.</p>';
+  return `<div class="done-list">${rows
+    .map(({ opening, line }) => {
+      const side = lineSide(opening, line);
+      const c = p.cards[line.id];
+      const st = STATUS[store.lineStatus(line.id)];
+      const facts = [
+        p.learned[line.id] ? `изучен ${shortDate(p.learned[line.id])}` : '',
+        c && c.reps ? `${c.reps} ${plural(c.reps, 'тренировка', 'тренировки', 'тренировок')}, последняя ${shortDate(c.last)}` : 'ещё не тренировал',
+        c ? (store.isDue(line.id) ? '<b class="due">пора повторить</b>' : `повторение ${inDays(store.daysUntil(c.due))}`) : '',
+      ].filter(Boolean);
+      return `<a class="done-row" href="#/o/${opening.id}">
+          <div class="dr-head">${sidePill(side, side === 'w' ? 'белые' : 'чёрные')}<b>${esc(opening.name)}</b><span class="${st.cls} pill">${st.text}</span></div>
+          <div class="dr-line">${esc(line.name)}</div>
+          <div class="dr-facts">${facts.join(' · ')}</div>
+          ${memoryBar(store.strength(line.id), c ? `Память ${c.box}/${store.MAX_BOX}` : '')}
+        </a>`;
+    })
+    .join('')}</div>`;
+}
+
 function profileView() {
   renderTopbar({ title: 'Профиль' });
   renderTabbar('profile');
@@ -2648,7 +2760,7 @@ function profileView() {
     const key = store.today(d);
     const xp = p.days[key] || 0;
     const lvl = xp === 0 ? 0 : xp < 30 ? 1 : xp < 60 ? 2 : xp < 120 ? 3 : 4;
-    cells.push(`<i class="c${lvl}" title="${key}: ${xp} XP"></i>`);
+    cells.push(`<i class="c${lvl}" data-day="${key}" title="${key}: ${xp} XP"></i>`);
   }
 
   const me = store.activeProfile();
@@ -2685,6 +2797,15 @@ function profileView() {
     <div class="card">
       <h2>Активность</h2>
       <div class="heat">${cells.join('')}</div>
+      <p class="muted small">Нажми на зелёный день — покажу, что в этот день пройдено.</p>
+    </div>
+    <div class="card history" id="history">
+      <h2>📅 Когда и что пройдено</h2>
+      <div id="hist-body"></div>
+    </div>
+    <div class="card" id="done-lines">
+      <h2>📚 Пройденные варианты</h2>
+      ${doneLinesHtml()}
     </div>
     <h2 class="section">Достижения</h2>
     <div class="achievements">
@@ -2747,6 +2868,32 @@ function profileView() {
     };
   });
   app.querySelector('#who-rename').onclick = () => renameProfileModal();
+
+  let histAll = false;
+  const renderHistory = (focusDay) => {
+    const box = app.querySelector('#hist-body');
+    box.innerHTML = historyHtml(store.history(), histAll);
+    const more = box.querySelector('#hist-more');
+    if (more)
+      more.onclick = () => {
+        histAll = true;
+        renderHistory();
+      };
+    if (focusDay) {
+      const day = box.querySelector(`[data-hday="${focusDay}"]`);
+      if (day) {
+        day.classList.add('flash');
+        day.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
+  };
+  renderHistory();
+  app.querySelector('.heat').onclick = (e) => {
+    const key = e.target.dataset && e.target.dataset.day;
+    if (!key || !store.progress.days[key]) return;
+    histAll = true;
+    renderHistory(key);
+  };
   renderGithubSync();
   app.querySelectorAll('[data-set]').forEach((el) =>
     el.addEventListener('change', () => store.saveSettings({ [el.dataset.set]: el.checked })),

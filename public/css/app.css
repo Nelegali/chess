@@ -3096,3 +3096,118 @@ cg-board square.mark-lost {
     flex-basis: 44px;
   }
 }
+
+/* ───── профиль: история занятий и пройденные варианты ───── */
+.heat i[data-day]:not(.c0) {
+  cursor: pointer;
+}
+.hist-day {
+  margin-top: 10px;
+  border-radius: 10px;
+  scroll-margin-top: calc(var(--topbar-h, 60px) + 10px);
+}
+.hist-day.flash {
+  animation: hist-flash 1.6s ease-out;
+}
+@keyframes hist-flash {
+  0%,
+  40% {
+    background: color-mix(in srgb, var(--gold) 25%, transparent);
+  }
+}
+.hist-day h3 {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 0 0 2px;
+  font-size: 0.95rem;
+}
+.hist-item {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.hi-ico {
+  font-size: 1.3rem;
+  line-height: 1.2;
+  text-align: center;
+}
+.hi-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+.hi-title a {
+  color: var(--text);
+  text-decoration: none;
+}
+.hi-title .side-pill {
+  font-size: 0.68rem;
+  padding: 0 7px;
+}
+.hi-sub {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.hi-res {
+  font-size: 0.88rem;
+}
+.hi-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.hi-xp {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+#hist-more {
+  margin-top: 10px;
+  width: 100%;
+}
+.done-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 8px;
+}
+.done-row {
+  display: block;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  color: var(--text);
+  text-decoration: none;
+}
+.dr-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dr-head b {
+  flex: 1;
+  min-width: 0;
+}
+.dr-head .side-pill {
+  font-size: 0.68rem;
+  padding: 0 7px;
+}
+.dr-line {
+  margin-top: 2px;
+  font-size: 0.88rem;
+}
+.dr-facts {
+  margin: 2px 0 6px;
+  font-size: 0.8rem;
+  color: var(--muted);
+}

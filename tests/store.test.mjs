@@ -78,6 +78,33 @@ store.progress.cards['scotch-mieses'].due = store.today(-3);
 const due = store.dueLines().map((x) => x.line.id);
 check('к повторению: сначала самые просроченные', due[0] === 'scotch-mieses' && due[1] === 'london-main');
 
+// Журнал занятий: урок, тренировка, викторина и достижения записываются с временем
+store.resetProgress();
+store.markLearned('london-main');
+store.recordDrill('london-main', 1, 0);
+store.recordQuiz(7, 10);
+const kinds = store.progress.log.map((e) => e.k);
+check('журнал: урок, тренировка, викторина и достижение записаны', ['learn', 'drill', 'quiz', 'ach'].every((k) => kinds.includes(k)));
+const drillEv = store.progress.log.find((e) => e.k === 'drill');
+check('журнал: у тренировки есть число ошибок и ступень памяти', drillEv.e === 1 && drillEv.b === 1 && drillEv.id === 'london-main');
+const hist = store.history();
+check('история: новые сверху, сгруппировать можно по дню', hist[0].t >= hist.at(-1).t && store.dayOf(hist[0].t) === store.today());
+
+// Старый прогресс без журнала: история восстанавливается по датам
+store.resetProgress();
+store.progress.log = [];
+store.progress.learned = { 'scotch-mieses': 1000 };
+store.progress.cards = { 'scotch-mieses': { box: 2, due: store.today(1), reps: 3, lapses: 0, last: 2000, best: 0 } };
+store.progress.achievements = { 'first-line': 1500 };
+const old = store.history();
+check('история без журнала: изучение, последняя тренировка и достижение', old.map((e) => e.k).join() === 'drill,ach,learn' && old.every((e) => e.old));
+
+// Журналы двух устройств объединяются без повторов
+const la = { log: [{ t: 1, k: 'learn', id: 'x' }, { t: 3, k: 'quiz', c: 5, n: 10 }] };
+const lb = { log: [{ t: 1, k: 'learn', id: 'x' }, { t: 2, k: 'drill', id: 'x', e: 0, b: 1 }] };
+const lm = store.merge({ ...a, ...la }, { ...b, ...lb });
+check('объединение: журналы складываются без повторов и по порядку', lm.log.map((e) => e.t).join() === '1,2,3');
+
 store.resetProgress();
 if (failed) {
   console.error(`\n✗ не прошло: ${failed}`);

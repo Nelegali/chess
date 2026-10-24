@@ -31,7 +31,16 @@ export const RANKS = [
 ];
 
 function emptyProgress() {
-  return { v: 1, updatedAt: 0, xp: 0, days: {}, cards: {}, learned: {}, quizBest: 0, achievements: {} };
+  return { v: 1, updatedAt: 0, xp: 0, days: {}, cards: {}, learned: {}, quizBest: 0, achievements: {}, log: [] };
+}
+
+// Журнал занятий «когда и что пройдено»: урок, тренировка, викторина, достижение.
+// { t: время, k: 'learn' | 'drill' | 'quiz' | 'ach', id?: вариант или достижение, … }
+const LOG_LIMIT = 500;
+function logEvent(ev) {
+  if (!Array.isArray(progress.log)) progress.log = [];
+  progress.log.push({ t: Date.now(), ...ev });
+  if (progress.log.length > LOG_LIMIT) progress.log.splice(0, progress.log.length - LOG_LIMIT);
 }
 
 const DEFAULT_SETTINGS = {
@@ -217,12 +226,14 @@ export function strength(lineId) {
 
 export function markLearned(lineId) {
   const first = !progress.learned[lineId];
-  if (first) progress.learned[lineId] = Date.now();
+  const now = Date.now();
+  if (first) progress.learned[lineId] = now;
   if (!progress.cards[lineId]) {
     progress.cards[lineId] = { box: 0, due: today(), reps: 0, lapses: 0, last: Date.now(), best: null };
   }
   const xp = first ? 30 : 10;
   addXp(xp);
+  logEvent({ t: now, k: 'learn', id: lineId, first, xp });
   const unlocked = checkAchievements();
   save();
   return { xp, first, unlocked };
@@ -261,6 +272,7 @@ export function recordDrill(lineId, mistakes, hints) {
   addXp(xp);
 
   if (errors === 0) progress.perfectDrills = (progress.perfectDrills || 0) + 1;
+  logEvent({ k: 'drill', id: lineId, e: errors, b: c.box, xp });
 
   const unlocked = checkAchievements();
   save();
@@ -279,6 +291,7 @@ export function recordQuiz(correct, total) {
   addXp(xp);
   progress.quizBest = Math.max(progress.quizBest || 0, correct);
   if (correct === total) progress.quizPerfect = (progress.quizPerfect || 0) + 1;
+  logEvent({ k: 'quiz', c: correct, n: total, xp });
   const unlocked = checkAchievements();
   save();
   return { xp, unlocked };
@@ -364,10 +377,34 @@ function checkAchievements() {
   for (const a of ACHIEVEMENTS) {
     if (!has(a.id) && conditions[a.id]) {
       progress.achievements[a.id] = Date.now();
+      logEvent({ t: progress.achievements[a.id], k: 'ach', id: a.id });
       unlocked.push(a);
     }
   }
   return unlocked;
+}
+
+// История занятий, новые сверху. Что было пройдено до появления журнала,
+// восстанавливаем по датам изучения, последних тренировок и достижений.
+export function history() {
+  const log = Array.isArray(progress.log) ? progress.log : [];
+  const has = (k, id) => log.some((e) => e.k === k && e.id === id);
+  const out = [...log];
+  for (const [id, t] of Object.entries(progress.learned || {})) {
+    if (!has('learn', id)) out.push({ t, k: 'learn', id, first: true, old: true });
+  }
+  for (const [id, c] of Object.entries(progress.cards || {})) {
+    if (c.reps > 0 && c.last && !has('drill', id)) out.push({ t: c.last, k: 'drill', id, b: c.box, old: true });
+  }
+  for (const [id, t] of Object.entries(progress.achievements || {})) {
+    if (!has('ach', id)) out.push({ t, k: 'ach', id, old: true });
+  }
+  return out.filter((e) => e.t > 0).sort((x, y) => y.t - x.t);
+}
+
+// Ключ дня (ГГГГ-ММ-ДД) для времени t — чтобы сгруппировать историю по дням.
+export function dayOf(t) {
+  return dateKey(new Date(t));
 }
 
 // ─── экспорт / импорт / сброс ───
@@ -410,6 +447,10 @@ export function merge(a, b) {
       if (!cur || (c.last || 0) > (cur.last || 0)) out.cards[id] = { ...c };
     }
   }
+  // журнал: объединяем записи обоих устройств без повторов
+  const seen = new Map();
+  for (const ev of [...(a.log || []), ...(b.log || [])]) seen.set(`${ev.t}|${ev.k}|${ev.id || ''}`, ev);
+  out.log = [...seen.values()].sort((x, y) => x.t - y.t).slice(-LOG_LIMIT);
   out.updatedAt = Math.max(a.updatedAt || 0, b.updatedAt || 0);
   return out;
 }
