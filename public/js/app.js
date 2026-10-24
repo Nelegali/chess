@@ -169,6 +169,14 @@ try {
   whyOpen = localStorage.getItem('why-open') !== '0';
 } catch {}
 const sideName = (c) => (c === 'w' ? 'белыми' : 'чёрными');
+// Плашка цвета стороны: белая — за белых, чёрная — за чёрных. Сразу видно, кем играешь.
+const sidePill = (c, text) => `<span class="side-pill sp-${c}">${text}</span>`;
+const forSide = (c) => (c === 'w' ? 'за белых' : 'за чёрных');
+// У ловушки сторона зависит от варианта: «Детский мат» учим и ставить, и отражать.
+function trapSides(o) {
+  const sides = new Set(o.lines.map((l) => lineSide(o, l)));
+  return sides.size > 1 ? '<span class="side-pill sp-wb"><i class="sp-dot"></i><i class="sp-dot b"></i>за обе стороны</span>' : sidePill([...sides][0], forSide([...sides][0]));
+}
 const colorName = (c) => (c === 'w' ? 'white' : 'black');
 const DIFF = { 1: 'Легко', 2: 'Средне', 3: 'Сложно' };
 
@@ -419,7 +427,7 @@ function homeView() {
   const mainAction = due.length
     ? `<a class="btn primary big" href="#/review">🔁 Повторить ${due.length} ${plural(due.length, 'вариант', 'варианта', 'вариантов')}</a>`
     : next
-      ? `<a class="btn primary big" href="#/learn/${next.line.id}">📖 Учить: ${esc(next.opening.name)}</a>`
+      ? `<a class="btn big side-btn sb-${lineSide(next.opening, next.line)}" href="#/learn/${next.line.id}">📖 Учить ${forSide(lineSide(next.opening, next.line))}: ${esc(next.opening.name)}</a>`
       : `<a class="btn primary big" href="#/quiz">❓ Викторина</a>`;
 
   app.innerHTML = `
@@ -509,6 +517,7 @@ function homeView() {
           <div class="ocard-body">
             <div class="ocard-top">
               <span class="side side-${o.category}">${CATEGORIES[o.category]}</span>
+              ${o.category === 'trap' ? trapSides(o) : ''}
               ${dueCount ? '<span class="due">повторить</span>' : ''}
             </div>
             <h3>${esc(o.name)}</h3>
@@ -571,14 +580,14 @@ function openingView(id) {
               <div class="line-head">
                 <div>
                   <h3>${esc(l.name)}</h3>
-                  <p class="muted">Играешь ${sideName(side)} · ${myCount} ${plural(myCount, 'ход', 'хода', 'ходов')}${due ? ` · ${due}` : ''}</p>
+                  <p class="muted">${sidePill(side, `играешь ${sideName(side)}`)} · ${myCount} ${plural(myCount, 'ход', 'хода', 'ходов')}${due ? ` · ${due}` : ''}</p>
                 </div>
                 <span class="${STATUS[st].cls} pill">${STATUS[st].text}</span>
               </div>
               ${memoryBar(store.strength(l.id), c ? `Память ${c.box}/${store.MAX_BOX}` : '')}
               <div class="row">
-                <a class="btn ${st === 'none' ? 'primary' : ''}" href="#/learn/${l.id}">📖 Изучить</a>
-                <a class="btn ${st !== 'none' ? 'primary' : ''}" href="#/drill/${l.id}">🎯 Тренировать</a>
+                <a class="btn ${st === 'none' ? `side-btn sb-${side}` : ''}" href="#/learn/${l.id}">📖 Изучить</a>
+                <a class="btn ${st !== 'none' ? `side-btn sb-${side}` : ''}" href="#/drill/${l.id}">🎯 Тренировать</a>
               </div>
             </div>`;
           })
@@ -635,6 +644,7 @@ function playLayout(opening, line, mode) {
       <div class="panel">
         <div class="panel-head">
           <div class="mode-tag ${mode}">${mode === 'learn' ? '📖 Изучение' : '🎯 Тренировка'}</div>
+          ${sidePill(lineSide(opening, line), `ты играешь ${sideName(lineSide(opening, line))}`)}
           <h2>${esc(opening.name)}</h2>
           <div class="sub-row">
             <p class="muted">${esc(line.name)}</p>
@@ -673,11 +683,17 @@ function setupInsight(board) {
   apply(!!store.settings.insight);
 }
 
+// Прогресс урока: полоска из ходов (пройденные — зелёные, текущий — жёлтый) и счёт «3/16».
 function renderDots(el, total, ply, side, fens) {
-  el.innerHTML = Array.from({ length: total }, (_, i) => {
+  const done = Math.max(0, Math.min(ply, total));
+  const segs = Array.from({ length: total }, (_, i) => {
     const mine = turnAt(fens[i]) === side;
     return `<i class="${i < ply ? 'done' : i === ply ? 'cur' : ''} ${mine ? 'mine' : ''}"></i>`;
   }).join('');
+  el.innerHTML = `<div class="lprog ${done === total ? 'finished' : ''}" role="progressbar" aria-label="Прогресс урока" aria-valuemin="0" aria-valuemax="${total}" aria-valuenow="${done}">
+      <div class="lp-bar">${segs}</div>
+      <span class="lp-txt">${done === total ? '✓ ' : ''}<span class="desk-only">пройдено </span><b>${done}</b>/${total}</span>
+    </div>`;
 }
 
 function learnView(lineId) {
@@ -725,7 +741,7 @@ function learnView(lineId) {
     renderDots(dots, N, -1, side, fens);
     body.innerHTML = `
       <div class="move-card intro-card">
-        <div class="move-head"><span class="san">Идея дебюта</span><span class="who me">ты играешь ${sideName(side)}</span></div>
+        <div class="move-head"><span class="san">Идея дебюта</span>${sidePill(side, `ты играешь ${sideName(side)}`)}</div>
         <div class="idea-box"><b>👆 На доске:</b> ${rich(essence.caption)}</div>
         <p class="explain">${rich(opening.about)}</p>
         <p class="explain muted">Это позиция, к которой мы придём. Теперь сыграем дебют с первого хода: свои ходы делай на доске сам — зелёная стрелка подскажет, а ходы соперника появятся по кнопке.</p>
@@ -796,8 +812,8 @@ function learnView(lineId) {
 
     const mover = ply > 0 ? turnAt(fens[ply - 1]) : null;
     const head = step
-      ? `<div class="move-head"><span class="san">${moveLabel(ply - 1, clean(step.m))}</span><span class="who ${mover === side ? 'me' : 'opp'}">${mover === side ? 'твой ход' : 'ход соперника'}</span>${annBadge(step.m)}</div>`
-      : `<div class="move-head"><span class="san">Начало</span><span class="who me">ты играешь ${sideName(side)}</span></div>`;
+      ? `<div class="move-head"><span class="san">${moveLabel(ply - 1, clean(step.m))}</span>${sidePill(mover, mover === side ? 'твой ход' : 'ход соперника')}${annBadge(step.m)}</div>`
+      : `<div class="move-head"><span class="san">Начало</span>${sidePill(side, `ты играешь ${sideName(side)}`)}</div>`;
     const text = step
       ? `<p class="explain">${rich(step.t)}</p>`
       : `<p class="explain">Начинаем с исходной позиции. Ходи на доске сам — зелёная стрелка подскажет. Ходы соперника появятся по кнопке. После каждого хода читай объяснение и смотри на стрелки.</p>${essence ? '<p class="explain muted">Кнопка ◀ вернёт к идее дебюта.</p>' : ''}`;
@@ -810,7 +826,7 @@ function learnView(lineId) {
     } else if (myTurn) {
       const nextStep = line.steps[ply];
       prompt = `<div class="prompt mine">
-          <div>Твой ход: <b>${figurine(clean(nextStep.m))}</b>. ${howToMove(next)}</div>
+          <div>Твой ход ${sidePill(side, sideName(side))}: <b>${figurine(clean(nextStep.m))}</b>. ${howToMove(next)}</div>
           <div class="why"><span class="why-label">Зачем этот ход</span>${rich(nextStep.t)}</div>
         </div>
         ${wrongMsg ? `<div class="wrong-msg vc-${wrongVerdict}" data-wrong="1">${wrongMsg}</div>` : ''}
@@ -1417,7 +1433,7 @@ function drillView(lineId, queue) {
         <span>Подсказки: <b>${hints}</b></span>
       </div>
       <div class="prompt ${myTurn ? 'mine' : ''}">
-        ${!next ? '🏁 Готово!' : myTurn ? `Твой ход ${sideName(side)}. Вспомни, что здесь играют!` : 'Соперник думает…'}
+        ${!next ? '🏁 Готово!' : myTurn ? `Твой ход ${sidePill(side, sideName(side))}. Вспомни, что здесь играют!` : 'Соперник думает…'}
       </div>
       ${
         myTurn && drillWhy
@@ -1972,7 +1988,7 @@ function freeView() {
   function lastMoveCard() {
     if (cursor === 0) {
       return `<div class="move-card">
-          <div class="move-head"><span class="san">Начальная позиция</span><span class="who me">ты играешь ${sideName(side)}</span></div>
+          <div class="move-head"><span class="san">Начальная позиция</span>${sidePill(side, `ты играешь ${sideName(side)}`)}</div>
           <p class="explain">Ходи на доске как хочешь. Я буду писать, какой дебют получается, оценивать каждый ход и показывать, насколько он популярен, а на ходу соперника — его самые частые ответы: выбери, как он сыграет.</p>
         </div>`;
     }
@@ -2012,7 +2028,7 @@ function freeView() {
       ? `<details class="why-more"><summary>Почему?</summary><p class="explain">${rich(a.text)}</p></details>`
       : `<p class="explain">${rich(a.text)}</p>`;
     return `<div class="move-card vc-${chance ? 'chance' : a.verdict}">
-        <div class="move-head"><span class="san">${moveLabel(i, m.san)}</span><span class="who ${mine ? 'me' : 'opp'}">${mine ? 'твой ход' : 'ход соперника'}</span></div>
+        <div class="move-head"><span class="san">${moveLabel(i, m.san)}</span>${sidePill(mover, mine ? 'твой ход' : 'ход соперника')}</div>
         ${chance ? chanceBanner(a.verdict, punish) : verdictBanner(a.verdict, punish, !mine && a.verdict === 'book' ? 'Соперник играет по теории' : undefined)}
         ${pop}
         ${engineNote}
@@ -2330,7 +2346,7 @@ function freeView() {
         <section class="page" data-page="0">
           ${lastMoveCard()}
           ${openingStatus()}
-          ${!over && myTurn ? `<div class="prompt mine">Твой ход ${sideName(turn)}: ходи на доске. <span class="phone-only">Не знаешь, что играть, — листай вправо 👉</span><span class="desk-only">Не знаешь, что играть, — нажми «💡 Что здесь играют?».</span></div>` : ''}
+          ${!over && myTurn ? `<div class="prompt mine">Твой ход ${sidePill(turn, sideName(turn))}: ходи на доске. <span class="phone-only">Не знаешь, что играть, — листай вправо 👉</span><span class="desk-only">Не знаешь, что играть, — нажми «💡 Что здесь играют?».</span></div>` : ''}
           ${!over && !myTurn ? '<p class="muted small phone-only">👉 Листай вправо — ответы соперника</p>' : ''}
         </section>
         <section class="page ${myTurn && page !== 1 ? 'desk-hidden' : ''}" data-page="1">
